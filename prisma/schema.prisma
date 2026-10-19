@@ -1,0 +1,760 @@
+// EPRFlow — Prisma schema (Phase 0 DRAFT)
+//
+// Conventions
+// - Every tenant-owned model has `organizationId` and is only ever queried
+//   through the tenant-scoped client (`getTenantDb(orgId)`), see docs/PHASE-0-PLAN.md §4.
+// - Global reference data (MaterialCategory, RegulationRule, platform Recyclers)
+//   has no organizationId and is read-only for tenants.
+// - Quantities are stored in KILOGRAMS as Decimal(18,3). The UI shows tonnes.
+// - Money is stored in INR as Decimal(14,2).
+// - Financial year is the Indian FY (Apr–Mar) stored as "2025-26".
+// - State is an ISO 3166-2:IN subdivision code without prefix ("MH", "KA", "DL"),
+//   validated by Zod against a constant list (not a DB enum so new UTs need no migration).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Connection URL is configured in prisma.config.ts (Phase 1).
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum Role {
+  ADMIN // full control, approves certificate purchases, billing
+  COMPLIANCE_MANAGER // day-to-day data entry, certificates, reports
+  VIEWER // read-only
+  CONSULTANT // external; same as COMPLIANCE_MANAGER minus billing/member mgmt
+}
+
+enum EntityType {
+  PRODUCER
+  IMPORTER
+  BRAND_OWNER
+}
+
+enum WasteStream {
+  PLASTIC
+  EWASTE
+  BATTERY
+}
+
+enum Plan {
+  STARTER
+  GROWTH
+  ENTERPRISE
+}
+
+enum DataSource {
+  MANUAL
+  IMPORT
+  AI_EXTRACTION
+}
+
+enum ImportStatus {
+  UPLOADED
+  VALIDATED // parsed, rows + errors available for preview
+  COMMITTED // valid rows written as MaterialEntry
+  FAILED
+}
+
+enum RuleType {
+  RECYCLING_TARGET // % of obligation to be met via recycling
+  COLLECTION_TARGET // % of quantity to be collected (e-waste/battery)
+  END_OF_LIFE_TARGET // % via end-of-life disposal (e.g. co-processing)
+  RECYCLED_CONTENT // % recycled content mandated in packaging
+  REUSE_TARGET // % reuse of rigid packaging
+  EC_RATE // Environmental Compensation INR per kg of shortfall
+  FILING_DEADLINE // annual/quarterly return due dates
+}
+
+enum VerificationStatus {
+  UNVERIFIED
+  PENDING
+  VERIFIED
+  SUSPENDED // registration revoked / blacklisted
+}
+
+enum CertificateStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+}
+
+enum FlagType {
+  DUPLICATE_NUMBER // same cert number already used within this org
+  DUPLICATE_CROSS_TENANT // same cert number used by another org (anonymised)
+  DUPLICATE_FILE // identical PDF (sha256) already uploaded
+  UNVERIFIED_RECYCLER
+  CAPACITY_EXCEEDED // recycler's total issued qty in FY > registered capacity
+  SUSPICIOUS_DATE // future date, before recycler registration, outside FY, weekend bulk etc.
+  PRICE_OUTLIER // price/kg far from recycler or market median
+  CATEGORY_MISMATCH // recycler not registered for this category
+}
+
+enum FlagSeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum FlagStatus {
+  OPEN
+  DISMISSED
+  RESOLVED
+}
+
+enum FileKind {
+  CERTIFICATE_PDF
+  INVOICE
+  IMPORT_SHEET
+  REPORT
+  OTHER
+}
+
+enum ExtractionStatus {
+  QUEUED
+  PROCESSING
+  NEEDS_REVIEW
+  APPROVED
+  REJECTED
+  FAILED
+}
+
+enum ExtractionTarget {
+  MATERIAL_ENTRY
+  CERTIFICATE
+}
+
+enum DeadlineStatus {
+  UPCOMING
+  DONE
+  MISSED
+}
+
+enum ReminderChannel {
+  EMAIL
+  WHATSAPP // Phase 6 produces WhatsApp-ready text; actual sending is a later integration
+}
+
+enum ReminderStatus {
+  SCHEDULED
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum AlertSeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+enum ReportType {
+  CPCB_ANNUAL_RETURN
+  OBLIGATION_SUMMARY
+  CERTIFICATE_REGISTER
+  MATERIAL_REGISTER
+  AUDIT_EXPORT
+}
+
+// ───────────────────────── Auth.js models ─────────────────────────
+
+model User {
+  id               String    @id @default(cuid())
+  name             String?
+  email            String    @unique
+  emailVerified    DateTime?
+  image            String?
+  passwordHash     String? // null for Google-only users
+  isPlatformAdmin  Boolean   @default(false) // edits regulation rules, verifies recyclers
+  lastActiveOrgId  String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  accounts         Account[]
+  sessions         Session[]
+  memberships      Membership[]
+  invitationsSent  Invitation[]    @relation("InvitedBy")
+  auditLogs        AuditLog[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ───────────────────────── Tenancy ─────────────────────────
+
+model Organization {
+  id                   String       @id @default(cuid())
+  slug                 String       @unique // used in URLs: /o/[slug]/...
+  name                 String
+  legalName            String?
+  entityTypes          EntityType[] // a company can be e.g. both PRODUCER and BRAND_OWNER
+  wasteStreams         WasteStream[] @default([PLASTIC])
+  pan                  String?
+  cin                  String?
+  cpcbRegistrationNo   String?
+  registeredAddress    String?
+  headOfficeState      String?
+  plan                 Plan         @default(STARTER)
+  onboardingCompletedAt DateTime?
+  createdAt            DateTime     @default(now())
+  updatedAt            DateTime     @updatedAt
+  deletedAt            DateTime?
+
+  memberships       Membership[]
+  invitations       Invitation[]
+  brands            Brand[]
+  plants            Plant[]
+  gstRegistrations  GstRegistration[]
+  materialEntries   MaterialEntry[]
+  importBatches     ImportBatch[]
+  obligations       ObligationSnapshot[]
+  recyclers         Recycler[] // org-private recyclers (platform ones have organizationId = null)
+  recyclerRatings   RecyclerRating[]
+  certificates      Certificate[]
+  certificateFlags  CertificateFlag[]
+  files             StoredFile[]
+  extractions       Extraction[]
+  budgets           Budget[]
+  deadlines         Deadline[]
+  reminders         Reminder[]
+  alerts            Alert[]
+  reports           Report[]
+  auditLogs         AuditLog[]
+}
+
+model Membership {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  role           Role
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+}
+
+model Invitation {
+  id             String    @id @default(cuid())
+  organizationId String
+  email          String
+  role           Role
+  tokenHash      String    @unique
+  invitedById    String
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy    User         @relation("InvitedBy", fields: [invitedById], references: [id])
+
+  @@index([organizationId, email])
+}
+
+model Brand {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  archivedAt     DateTime?
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  materialEntries MaterialEntry[]
+
+  @@unique([organizationId, name])
+}
+
+model GstRegistration {
+  id             String    @id @default(cuid())
+  organizationId String
+  gstin          String // 15 chars, checksum validated by Zod
+  stateCode      String // derived from first 2 digits of GSTIN
+  legalName      String?
+  tradeName      String?
+  createdAt      DateTime  @default(now())
+  archivedAt     DateTime?
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  plants          Plant[]
+  materialEntries MaterialEntry[]
+
+  @@unique([organizationId, gstin])
+}
+
+model Plant {
+  id                String    @id @default(cuid())
+  organizationId    String
+  gstRegistrationId String?
+  name              String
+  stateCode         String
+  city              String?
+  address           String?
+  pincode           String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  archivedAt        DateTime?
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  gstRegistration GstRegistration? @relation(fields: [gstRegistrationId], references: [id])
+  materialEntries MaterialEntry[]
+
+  @@unique([organizationId, name])
+}
+
+// ───────────────────── Reference data (global) ─────────────────────
+
+/// Extensible category list instead of an enum: new e-waste / battery categories
+/// are seed rows, not migrations. Codes: PLASTIC_CAT_I … PLASTIC_CAT_IV,
+/// BATTERY_PORTABLE, BATTERY_EV, BATTERY_INDUSTRIAL, BATTERY_AUTOMOTIVE,
+/// EWASTE_ITEW, EWASTE_CEW, … (seeded in Phase 3).
+model MaterialCategory {
+  id          String      @id @default(cuid())
+  code        String      @unique
+  stream      WasteStream
+  name        String // "Category II – Flexible plastic packaging"
+  description String?
+  sortOrder   Int         @default(0)
+  active      Boolean     @default(true)
+
+  materialEntries   MaterialEntry[]
+  regulationRules   RegulationRule[]
+  obligations       ObligationSnapshot[]
+  certificates      Certificate[]
+  recyclerCapacities RecyclerCapacity[]
+  budgets           Budget[]
+}
+
+/// All regulatory numbers live here, never in code.
+/// A rule applies when stream/category/entityType match (null = any) and
+/// effectiveFrom <= date < effectiveTo. Highest `version` wins on overlap.
+/// Seeded values are placeholders: isVerified = false and
+/// notes = "VERIFY WITH LATEST CPCB NOTIFICATION".
+model RegulationRule {
+  id              String      @id @default(cuid())
+  stream          WasteStream
+  categoryId      String?
+  entityType      EntityType?
+  ruleType        RuleType
+  financialYear   String? // "2025-26"; null for rules expressed only by date range
+  value           Decimal     @db.Decimal(12, 4) // % (e.g. 50.0000) or INR/kg for EC_RATE
+  unit            String // "PERCENT" | "INR_PER_KG" | "DATE"
+  parameters      Json? // e.g. { "baseYearsLookback": 2, "dueMonthDay": "06-30" }
+  effectiveFrom   DateTime
+  effectiveTo     DateTime?
+  version         Int         @default(1)
+  sourceReference String? // notification no. / gazette link
+  isVerified      Boolean     @default(false)
+  notes           String?
+  createdById     String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  category MaterialCategory? @relation(fields: [categoryId], references: [id])
+
+  @@index([stream, ruleType, effectiveFrom])
+  @@index([categoryId, ruleType])
+}
+
+// ─────────────────────── Material data (Phase 2) ───────────────────────
+
+/// Quantity placed on the market for one month / category / dimension combo.
+model MaterialEntry {
+  id                String      @id @default(cuid())
+  organizationId    String
+  categoryId        String
+  entityType        EntityType // capacity in which material was introduced
+  periodMonth       DateTime    @db.Date // first day of month
+  financialYear     String // derived from periodMonth
+  stateCode         String
+  brandId           String?
+  plantId           String?
+  gstRegistrationId String?
+  quantityKg        Decimal     @db.Decimal(18, 3)
+  recycledContentKg Decimal?    @db.Decimal(18, 3)
+  isPreConsumer     Boolean     @default(false) // pre-consumer waste is excluded from some obligations
+  source            DataSource  @default(MANUAL)
+  importBatchId     String?
+  extractionId      String?
+  notes             String?
+  createdById       String
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  deletedAt         DateTime?
+
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category        MaterialCategory @relation(fields: [categoryId], references: [id])
+  brand           Brand?           @relation(fields: [brandId], references: [id])
+  plant           Plant?           @relation(fields: [plantId], references: [id])
+  gstRegistration GstRegistration? @relation(fields: [gstRegistrationId], references: [id])
+  importBatch     ImportBatch?     @relation(fields: [importBatchId], references: [id])
+  extraction      Extraction?      @relation(fields: [extractionId], references: [id])
+
+  @@index([organizationId, financialYear, categoryId])
+  @@index([organizationId, periodMonth])
+}
+
+model ImportBatch {
+  id             String       @id @default(cuid())
+  organizationId String
+  fileId         String
+  status         ImportStatus @default(UPLOADED)
+  totalRows      Int          @default(0)
+  validRows      Int          @default(0)
+  errorRows      Int          @default(0)
+  errors         Json? // [{ row, column, message, raw }]
+  createdById    String
+  createdAt      DateTime     @default(now())
+  committedAt    DateTime?
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  file            StoredFile      @relation(fields: [fileId], references: [id])
+  materialEntries MaterialEntry[]
+
+  @@index([organizationId, createdAt])
+}
+
+// ─────────────────── Obligations & budget (Phase 3) ───────────────────
+
+/// Persisted result of the calculator so reports and history are reproducible.
+/// Recomputed on demand; previous snapshots kept (isCurrent = false).
+model ObligationSnapshot {
+  id              String      @id @default(cuid())
+  organizationId  String
+  financialYear   String
+  categoryId      String
+  entityType      EntityType
+  stateCode       String? // null = national total
+  ruleType        RuleType
+  baseQuantityKg  Decimal     @db.Decimal(18, 3)
+  targetPercent   Decimal     @db.Decimal(7, 4)
+  targetKg        Decimal     @db.Decimal(18, 3)
+  fulfilledKg     Decimal     @db.Decimal(18, 3)
+  shortfallKg     Decimal     @db.Decimal(18, 3)
+  estimatedEcInr  Decimal     @db.Decimal(14, 2)
+  ruleIds         String[] // RegulationRule ids used — audit trail of which rule version applied
+  isCurrent       Boolean     @default(true)
+  computedAt      DateTime    @default(now())
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category     MaterialCategory @relation(fields: [categoryId], references: [id])
+
+  @@index([organizationId, financialYear, isCurrent])
+}
+
+model Budget {
+  id             String   @id @default(cuid())
+  organizationId String
+  financialYear  String
+  categoryId     String? // null = overall budget
+  amountInr      Decimal  @db.Decimal(14, 2)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category     MaterialCategory? @relation(fields: [categoryId], references: [id])
+
+  @@unique([organizationId, financialYear, categoryId])
+}
+
+// ─────────────────── Recyclers & certificates (Phase 4) ───────────────────
+
+/// organizationId = null → platform directory entry (curated by platform admins).
+/// organizationId set     → private entry added by a tenant (always starts UNVERIFIED).
+model Recycler {
+  id                  String             @id @default(cuid())
+  organizationId      String?
+  name                String
+  cpcbRegistrationNo  String?
+  gstin               String?
+  stateCode           String
+  city                String?
+  address             String?
+  contactEmail        String?
+  contactPhone        String?
+  verificationStatus  VerificationStatus @default(UNVERIFIED)
+  registrationValidFrom DateTime?
+  registrationValidTo   DateTime?
+  verifiedAt          DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  organization Organization?      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  capacities   RecyclerCapacity[]
+  ratings      RecyclerRating[]
+  certificates Certificate[]
+
+  @@index([cpcbRegistrationNo])
+  @@index([organizationId])
+}
+
+model RecyclerCapacity {
+  id               String  @id @default(cuid())
+  recyclerId       String
+  categoryId       String
+  financialYear    String
+  annualCapacityKg Decimal @db.Decimal(18, 3)
+
+  recycler Recycler         @relation(fields: [recyclerId], references: [id], onDelete: Cascade)
+  category MaterialCategory @relation(fields: [categoryId], references: [id])
+
+  @@unique([recyclerId, categoryId, financialYear])
+}
+
+model RecyclerRating {
+  id             String   @id @default(cuid())
+  organizationId String
+  recyclerId     String
+  userId         String
+  rating         Int // 1–5
+  comment        String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  recycler     Recycler     @relation(fields: [recyclerId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, recyclerId, userId])
+}
+
+/// Pricing history per recycler is derived from Certificate.pricePerKgInr.
+model Certificate {
+  id                         String            @id @default(cuid())
+  organizationId             String
+  recyclerId                 String
+  categoryId                 String
+  certificateNumber          String
+  certificateNumberNormalized String // upper-case, whitespace/dash stripped — used for duplicate checks
+  financialYear              String
+  stateCode                  String?
+  quantityKg                 Decimal           @db.Decimal(18, 3)
+  issueDate                  DateTime          @db.Date
+  transferDate               DateTime?         @db.Date
+  costInr                    Decimal?          @db.Decimal(14, 2)
+  pricePerKgInr              Decimal?          @db.Decimal(10, 4)
+  status                     CertificateStatus @default(DRAFT)
+  fileId                     String?
+  extractionId               String?
+  createdById                String
+  approvedById               String?
+  approvedAt                 DateTime?
+  notes                      String?
+  createdAt                  DateTime          @default(now())
+  updatedAt                  DateTime          @updatedAt
+  deletedAt                  DateTime?
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  recycler     Recycler          @relation(fields: [recyclerId], references: [id])
+  category     MaterialCategory  @relation(fields: [categoryId], references: [id])
+  file         StoredFile?       @relation(fields: [fileId], references: [id])
+  extraction   Extraction?       @relation(fields: [extractionId], references: [id])
+  flags        CertificateFlag[]
+
+  @@unique([organizationId, certificateNumberNormalized])
+  @@index([certificateNumberNormalized]) // cross-tenant duplicate lookup
+  @@index([recyclerId, financialYear])
+  @@index([organizationId, financialYear, categoryId])
+}
+
+model CertificateFlag {
+  id             String       @id @default(cuid())
+  organizationId String
+  certificateId  String
+  type           FlagType
+  severity       FlagSeverity
+  message        String
+  details        Json?
+  status         FlagStatus   @default(OPEN)
+  resolvedById   String?
+  resolvedAt     DateTime?
+  resolutionNote String?
+  createdAt      DateTime     @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  certificate  Certificate  @relation(fields: [certificateId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+  @@unique([certificateId, type])
+}
+
+// ─────────────────────── Files & AI extraction (Phase 5) ───────────────────────
+
+model StoredFile {
+  id             String   @id @default(cuid())
+  organizationId String
+  kind           FileKind
+  storageKey     String   @unique // "org/<orgId>/<kind>/<cuid>.<ext>"
+  fileName       String
+  mimeType       String
+  sizeBytes      Int
+  sha256         String
+  uploadedById   String
+  createdAt      DateTime @default(now())
+
+  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  importBatches ImportBatch[]
+  certificates  Certificate[]
+  extractions   Extraction[]
+  reports       Report[]
+
+  @@index([organizationId, sha256])
+}
+
+model Extraction {
+  id             String           @id @default(cuid())
+  organizationId String
+  fileId         String
+  target         ExtractionTarget
+  status         ExtractionStatus @default(QUEUED)
+  model          String? // value of ANTHROPIC_MODEL at run time
+  extracted      Json? // raw structured output from Claude (Zod-validated)
+  reviewed       Json? // values after human edits
+  confidence     Json? // per-field confidence
+  error          String?
+  inputTokens    Int?
+  outputTokens   Int?
+  createdById    String
+  reviewedById   String?
+  reviewedAt     DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  file            StoredFile      @relation(fields: [fileId], references: [id])
+  materialEntries MaterialEntry[]
+  certificates    Certificate[]
+
+  @@index([organizationId, status])
+}
+
+// ─────────────────── Deadlines, reminders, alerts (Phase 3/6) ───────────────────
+
+model Deadline {
+  id             String         @id @default(cuid())
+  organizationId String
+  title          String // "Annual return FY 2025-26"
+  description    String?
+  dueDate        DateTime       @db.Date
+  financialYear  String?
+  stream         WasteStream?
+  ruleId         String? // generated from a FILING_DEADLINE rule, or null if custom
+  status         DeadlineStatus @default(UPCOMING)
+  completedAt    DateTime?
+  createdAt      DateTime       @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  reminders    Reminder[]
+
+  @@index([organizationId, dueDate])
+}
+
+model Reminder {
+  id             String          @id @default(cuid())
+  organizationId String
+  deadlineId     String
+  channel        ReminderChannel
+  recipient      String // email or phone
+  sendAt         DateTime
+  sentAt         DateTime?
+  status         ReminderStatus  @default(SCHEDULED)
+  error          String?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  deadline     Deadline     @relation(fields: [deadlineId], references: [id], onDelete: Cascade)
+
+  @@index([status, sendAt])
+}
+
+model Alert {
+  id             String        @id @default(cuid())
+  organizationId String
+  severity       AlertSeverity
+  title          String // "40% behind on Cat II with 3 months left"
+  body           String?
+  link           String?
+  dedupeKey      String // e.g. "behind:2025-26:PLASTIC_CAT_II" — prevents duplicate alerts
+  readAt         DateTime?
+  createdAt      DateTime      @default(now())
+  resolvedAt     DateTime?
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, dedupeKey])
+}
+
+// ─────────────────────── Reports & audit (Phase 6) ───────────────────────
+
+model Report {
+  id             String     @id @default(cuid())
+  organizationId String
+  type           ReportType
+  financialYear  String?
+  format         String // "XLSX" | "PDF"
+  fileId         String
+  generatedById  String
+  createdAt      DateTime   @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  file         StoredFile   @relation(fields: [fileId], references: [id])
+}
+
+/// Append-only. Written in the same transaction as the change it records.
+model AuditLog {
+  id             String   @id @default(cuid())
+  organizationId String? // null = platform-level action (e.g. regulation rule edit)
+  actorId        String?
+  action         String // "certificate.create", "rule.update", "member.role_change"
+  entityType     String
+  entityId       String
+  before         Json?
+  after          Json?
+  ip             String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actor        User?        @relation(fields: [actorId], references: [id])
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, entityType, entityId])
+}
