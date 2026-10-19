@@ -1,7 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { FormError, FormField } from "@/components/app/form-field";
+import { PasswordInput, PasswordRules } from "@/components/app/password-input";
 import { SubmitButton } from "@/components/app/submit-button";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -12,14 +14,14 @@ import { googleSignInAction, loginAction, signupAction } from "./actions";
 export function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
   const [state, onSubmit, pending] = useFormAction(loginAction, {} as ActionState);
   return (
-    <form onSubmit={onSubmit} className="grid gap-4">
+    <form onSubmit={onSubmit} noValidate className="grid gap-4">
       <input type="hidden" name="callbackUrl" value={callbackUrl ?? ""} />
       <FormError message={state.error} />
       <FormField label="Work email" htmlFor="email" error={state.fieldErrors?.email}>
         <Input id="email" name="email" type="email" autoComplete="email" required autoFocus />
       </FormField>
       <FormField label="Password" htmlFor="password" error={state.fieldErrors?.password}>
-        <Input id="password" name="password" type="password" autoComplete="current-password" required />
+        <PasswordInput id="password" name="password" autoComplete="current-password" required />
       </FormField>
       <SubmitButton size="lg" className="w-full" pending={pending}>
         Log in
@@ -30,8 +32,9 @@ export function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
 
 export function SignupForm({ callbackUrl, defaultEmail }: { callbackUrl?: string; defaultEmail?: string }) {
   const [state, onSubmit, pending] = useFormAction(signupAction, {} as ActionState);
+  const [password, setPassword] = useState("");
   return (
-    <form onSubmit={onSubmit} className="grid gap-4">
+    <form onSubmit={onSubmit} noValidate className="grid gap-4">
       <input type="hidden" name="callbackUrl" value={callbackUrl ?? ""} />
       <FormError message={state.error} />
       <FormField label="Full name" htmlFor="name" error={state.fieldErrors?.name}>
@@ -40,14 +43,12 @@ export function SignupForm({ callbackUrl, defaultEmail }: { callbackUrl?: string
       <FormField label="Work email" htmlFor="email" error={state.fieldErrors?.email}>
         <Input id="email" name="email" type="email" autoComplete="email" defaultValue={defaultEmail} required />
       </FormField>
-      <FormField
-        label="Password"
-        htmlFor="password"
-        error={state.fieldErrors?.password}
-        hint="At least 10 characters, with a letter and a number."
-      >
-        <Input id="password" name="password" type="password" autoComplete="new-password" required />
-      </FormField>
+      <div className="grid gap-2">
+        <FormField label="Password" htmlFor="password" error={state.fieldErrors?.password}>
+          <PasswordInput id="password" name="password" autoComplete="new-password" required onValueChange={setPassword} />
+        </FormField>
+        <PasswordRules value={password} />
+      </div>
       <SubmitButton size="lg" className="w-full" pending={pending}>
         Create account
       </SubmitButton>

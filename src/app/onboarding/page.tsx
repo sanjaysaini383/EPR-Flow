@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Logo } from "@/components/app/logo";
+import { ThemeToggle } from "@/components/app/theme-toggle";
 import { listUserOrganizations, requireUser } from "@/lib/auth/session";
 import { OnboardingWizard } from "./wizard";
 
@@ -11,14 +12,17 @@ export default async function OnboardingPage() {
   const orgs = await listUserOrganizations(user.id);
 
   return (
-    <div className="min-h-svh bg-muted/40">
-      <header className="flex h-14 items-center justify-between border-b bg-background px-6">
+    <div className="bg-brand-glow min-h-svh">
+      <header className="flex h-14 items-center justify-between border-b bg-background/70 px-6 backdrop-blur">
         <Logo />
-        {orgs.length > 0 && (
-          <Link href="/o" className="text-sm text-muted-foreground hover:text-foreground">
-            Back to my organizations
-          </Link>
-        )}
+        <div className="flex items-center gap-3">
+          {orgs.length > 0 && (
+            <Link href="/o" className="text-sm text-muted-foreground hover:text-foreground">
+              Back to my organizations
+            </Link>
+          )}
+          <ThemeToggle />
+        </div>
       </header>
       <main className="mx-auto max-w-2xl px-6 py-10">
         <div className="mb-8 space-y-1">

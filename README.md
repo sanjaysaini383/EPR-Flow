@@ -70,6 +70,21 @@ e2e/                 Playwright specs
 
 Feature code never touches the raw Prisma client. `getOrgContext(orgSlug)` checks membership (non-members get a 404) and returns `db`, a client that injects `organizationId` into every query and rejects writes to other tenants — see [src/lib/db/tenant-scope.ts](src/lib/db/tenant-scope.ts) and its tests. An ESLint rule blocks importing `@/lib/db/client` outside auth/onboarding code.
 
+### Security measures
+
+| Area | What's in place |
+|---|---|
+| Tenant isolation | Tenant-scoped Prisma client + membership check on every page/action; non-members get 404 |
+| Authorization | Single role/permission table ([permissions.ts](src/lib/domain/permissions.ts)), re-checked inside every server action |
+| Authentication | Argon2 password hashing, constant-time login (no email enumeration by timing), 7-day sessions, proxy redirects signed-out users |
+| Brute force | Postgres-backed rate limits on login (per IP + per email), signup, invites and invite acceptance |
+| Input validation | Zod on every input; text is Unicode-normalised and stripped of control / zero-width / bidi-override characters; strict PAN, CIN, GSTIN (checksum) formats |
+| Browser protections | Per-request CSP nonce, `frame-ancestors 'none'`, HSTS, nosniff, strict referrer policy, Permissions-Policy, no `x-powered-by` |
+| Redirects | Only same-site relative `callbackUrl`s are honoured (blocks open redirects) |
+| Errors | Users see clear messages; unexpected errors show only a reference id — stack traces and SQL never reach the browser |
+| Audit trail | Every change logged with actor, IP and user agent; secrets are stripped from logged values |
+| Secrets | Invite tokens stored as SHA-256 hashes; env vars validated at startup ([env.ts](src/lib/env.ts)) |
+
 ## Deploying (Vercel + Neon)
 
 1. Create a Neon project. Copy the **pooled** connection string (host contains `-pooler`) into `DATABASE_URL` and the **direct** one into `DIRECT_URL`.

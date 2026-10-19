@@ -10,6 +10,8 @@ import { prisma } from "@/lib/db/client";
 import { ROLE_LABELS } from "@/lib/domain/permissions";
 import { appUrl, sendEmail } from "@/lib/email/send";
 import { hashInviteToken, INVITE_TTL_DAYS } from "@/lib/invitations";
+import { LIMITS, rateLimit } from "@/lib/security/rate-limit";
+import { getClientIp } from "@/lib/security/request";
 import { changeRoleSchema, inviteMemberSchema } from "@/lib/validation/organization";
 
 export type InviteState = ActionState & { inviteUrl?: string };
@@ -20,6 +22,7 @@ export async function inviteMemberAction(orgSlug: string, _prev: InviteState, fo
     const parsed = inviteMemberSchema.safeParse(Object.fromEntries(formData));
     if (!parsed.success) return fieldErrors(parsed.error);
     const { email, role } = parsed.data;
+    await rateLimit(`invite:org:${org.id}`, LIMITS.invitePerOrg);
 
     const existingMember = await db.membership.findFirst({ where: { user: { email } }, select: { id: true } });
     if (existingMember) return { fieldErrors: { email: ["This person is already a member."] } };
@@ -155,6 +158,8 @@ export async function removeMemberAction(orgSlug: string, membershipId: string):
 /** Accepting happens before the user is a member, so it uses the base client and checks the token itself. */
 export async function acceptInvitationAction(token: string) {
   const user = await requireUser(`/invite/${token}`);
+  await rateLimit(`invite-accept:ip:${await getClientIp()}`, LIMITS.acceptInvitePerIp);
+  if (!/^[A-Za-z0-9_-]{20,100}$/.test(token)) redirect(`/invite/${token}`);
   const invitation = await prisma.invitation.findUnique({
     where: { tokenHash: hashInviteToken(token) },
     include: { organization: { select: { slug: true, deletedAt: true } } },

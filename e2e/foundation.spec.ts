@@ -10,7 +10,7 @@ test.describe("signup and onboarding", () => {
     await page.goto("/signup");
     await page.getByLabel("Full name").fill("E2E Tester");
     await page.getByLabel("Work email").fill(email);
-    await page.getByLabel("Password").fill("Sup3rSecretPass");
+    await page.getByLabel("Password", { exact: true }).fill("Sup3rSecretPass");
     await page.getByRole("button", { name: "Create account" }).click();
 
     await expect(page).toHaveURL(/\/onboarding/);
@@ -81,7 +81,8 @@ test.describe("roles and members", () => {
     await login(page, "compliance@demo.eprflow.in");
     await page.getByRole("link", { name: "Certificates" }).click();
     await expect(page.getByText("Coming in phase 4")).toBeVisible();
-    const response = await page.goto(`/o/${DEMO_ORG}/not-a-section`);
-    expect(response?.status()).toBe(404);
+    // Streams behind the loading skeleton, so the status is 200 + noindex; the UI shows the 404.
+    await page.goto(`/o/${DEMO_ORG}/not-a-section`);
+    await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
   });
 });

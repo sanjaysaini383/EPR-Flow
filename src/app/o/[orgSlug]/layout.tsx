@@ -1,5 +1,7 @@
 import { cookies } from "next/headers";
+import { AppBreadcrumb } from "@/components/app/app-breadcrumb";
 import { AppSidebar } from "@/components/app/app-sidebar";
+import { ThemeToggle } from "@/components/app/theme-toggle";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { getOrgContext, listUserOrganizations, rememberActiveOrg } from "@/lib/auth/session";
@@ -21,12 +23,15 @@ export default async function OrgLayout({ children, params }: LayoutProps<"/o/[o
         user={{ name: user.name, email: user.email, image: user.image }}
       />
       <SidebarInset>
-        <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+        <header className="sticky top-0 z-10 flex h-14 shrink-0 items-center gap-2 border-b bg-background/80 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
-          <span className="truncate text-sm text-muted-foreground">{org.name}</span>
+          <AppBreadcrumb orgName={org.name} orgSlug={org.slug} />
+          <div className="ml-auto">
+            <ThemeToggle />
+          </div>
         </header>
-        <div className="flex-1 p-4 md:p-6 lg:p-8">{children}</div>
+        <div className="mx-auto w-full max-w-7xl flex-1 p-4 md:p-6 lg:p-8">{children}</div>
       </SidebarInset>
     </SidebarProvider>
   );

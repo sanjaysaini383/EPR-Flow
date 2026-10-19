@@ -12,6 +12,7 @@ const eslintConfig = defineConfig([
     ignores: [
       "src/lib/db/**",
       "src/lib/auth/**",
+      "src/lib/security/**",
       "src/auth.ts",
       "src/app/onboarding/**",
       "src/app/(auth)/**",

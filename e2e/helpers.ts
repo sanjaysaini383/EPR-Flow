@@ -6,7 +6,7 @@ export const DEMO_ORG = "demo-consumer-goods";
 export async function login(page: Page, email: string, password = DEMO_PASSWORD) {
   await page.goto("/login");
   await page.getByLabel("Work email").fill(email);
-  await page.getByLabel("Password").fill(password);
+  await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Log in" }).click();
   await expect(page).toHaveURL(/\/o\/[^/]+\/dashboard/);
 }

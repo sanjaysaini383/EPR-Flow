@@ -101,7 +101,7 @@ export function AppSidebar({ org, orgs, user }: { org: Org; orgs: Org[]; user: U
                           <span>{item.label}</span>
                         </Link>
                       </SidebarMenuButton>
-                      {item.phase && <SidebarMenuBadge className="text-[10px] text-muted-foreground">Soon</SidebarMenuBadge>}
+                      {item.phase && <SidebarMenuBadge className="rounded-full border px-1.5 text-[10px] font-normal text-muted-foreground">Soon</SidebarMenuBadge>}
                     </SidebarMenuItem>
                   );
                 })}

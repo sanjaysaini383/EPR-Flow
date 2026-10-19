@@ -758,3 +758,16 @@ model AuditLog {
   @@index([organizationId, createdAt])
   @@index([organizationId, entityType, entityId])
 }
+
+// ─────────────────────── Security ───────────────────────
+
+/// Fixed-window rate limit counters (login, signup, invites…). Postgres-backed so it
+/// works across Vercel serverless instances without Redis. Old rows are harmless and
+/// are pruned opportunistically.
+model RateLimit {
+  key         String   @id // "login:ip:1.2.3.4", "signup:ip:…"
+  count       Int
+  windowStart DateTime
+
+  @@index([windowStart])
+}
