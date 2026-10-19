@@ -1,33 +1,32 @@
 # EPRFlow — Phase 0 Plan
 
-Status: **proposal, awaiting sign-off**. The Prisma schema draft is in [`prisma/schema.prisma`](../prisma/schema.prisma).
+Status: **approved** (defaults accepted; deployment changed to Vercel + Neon). The Prisma schema draft is in [`prisma/schema.prisma`](../prisma/schema.prisma).
 
 ## 1. Stack decisions
 
 | Concern | Choice | Notes |
 |---|---|---|
-| Framework | Next.js 16 (App Router) + TypeScript strict | Server Components by default; Server Actions for mutations |
+| Framework | Next.js 16 (App Router) + TypeScript strict | Server Components by default; Server Actions for mutations. `cacheComponents` off for now (all pages are authenticated & per-tenant) |
 | UI | Tailwind CSS v4 + shadcn/ui, Recharts for charts | lucide-react icons |
 | DB | PostgreSQL 17 + Prisma 7 | `prisma.config.ts`, generated client in `src/generated/prisma` |
 | Auth | Auth.js v5: Credentials (argon2 hash) + Google | JWT session strategy (required for Credentials); org membership resolved per request |
 | Validation | Zod v4 | Shared schemas in `src/lib/validation` used by forms and server |
 | Files | `StorageAdapter` interface → `LocalFsStorage` (dev) / `S3Storage` (MinIO/S3) | Selected by `STORAGE_DRIVER` env |
 | AI | `@anthropic-ai/sdk`, model from `ANTHROPIC_MODEL` | Structured output validated with Zod before it is stored |
-| Jobs | pg-boss (Postgres-backed queue + cron) | No Redis needed; one `worker` process in Docker Compose |
+| Jobs | Vercel Cron → `/api/cron/*` route handlers | Serverless-friendly; idempotent handlers protected by `CRON_SECRET` |
 | Email | Nodemailer (SMTP); Mailpit in Docker for dev | WhatsApp: generate ready-to-send text + `wa.me` link (no API integration yet) |
 | Excel/CSV | ExcelJS (read + write), papaparse for CSV | |
 | PDF | `@react-pdf/renderer` for reports | |
 | Tests | Vitest (domain logic), Playwright (key flows) | |
 | Package manager | npm | |
 
-I picked **pg-boss over BullMQ** because it removes the need for Redis while giving us retries, cron and a persistent queue. This can be swapped later.
+**Hosting:** Vercel + Neon Postgres. Runtime uses Neon's pooled URL (`DATABASE_URL`), migrations use the direct URL (`DIRECT_URL`). Long-running work (AI extraction) runs inside route handlers/actions with `after()` and status polling rather than a separate worker. Docker Compose is used only for local Postgres + Mailpit.
 
 ## 2. Folder structure
 
 ```
 eprflow/
-├─ docker-compose.yml          # postgres, mailpit, minio, app, worker
-├─ Dockerfile
+├─ docker-compose.yml          # local dev only: postgres, mailpit
 ├─ prisma/
 │  ├─ schema.prisma
 │  ├─ migrations/
@@ -81,12 +80,11 @@ eprflow/
    │  ├─ auth/                 # Auth.js config, requireUser(), requireOrgRole()
    │  ├─ storage/              # StorageAdapter + local/S3 drivers
    │  ├─ ai/                   # Claude client + extraction prompts/schemas
-   │  ├─ jobs/                 # pg-boss setup + job handlers
+   │  ├─ jobs/                 # cron job handlers (called from /api/cron/*)
    │  ├─ email/
    │  ├─ audit.ts
    │  └─ validation/           # shared Zod schemas
-   ├─ generated/prisma/        # (gitignored)
-   └─ worker.ts                # job worker entrypoint
+   └─ generated/prisma/        # (gitignored)
 ```
 
 ## 3. Data model summary

@@ -69,3 +69,10 @@ export async function listUserOrganizations(userId: string) {
   });
   return memberships.map((m) => ({ ...m.organization, role: m.role as Role }));
 }
+
+/** Remembers the org the user last opened so /o can send them back there. */
+export async function rememberActiveOrg(user: CurrentUser, orgId: string) {
+  if (user.lastActiveOrgId !== orgId) {
+    await prisma.user.update({ where: { id: user.id }, data: { lastActiveOrgId: orgId } });
+  }
+}
