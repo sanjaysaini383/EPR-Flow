@@ -13,3 +13,7 @@ storage/
 .DS_Store
 .vscode/*
 !.vscode/extensions.json
+.vercel
+*.tsbuildinfo
+next-env.d.ts
+*.pem

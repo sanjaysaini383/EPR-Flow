@@ -1,0 +1,27 @@
+# Local development services. Production runs on Vercel + Neon (see README).
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: eprflow
+      POSTGRES_PASSWORD: eprflow
+      POSTGRES_DB: eprflow
+    ports:
+      - "5433:5432" # 5433 on the host to avoid clashing with a locally installed Postgres
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eprflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Catches all outgoing email in dev. Web UI: http://localhost:8025
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+volumes:
+  pgdata:
