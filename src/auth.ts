@@ -20,6 +20,13 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: "jwt" },
   pages: { signIn: "/login" },
   trustHost: true,
+  logger: {
+    // A wrong password is a normal outcome (shown to the user), not a server error.
+    error(error) {
+      if (error.name === "CredentialsSignin") return;
+      console.error(error);
+    },
+  },
   providers: [
     Credentials({
       credentials: { email: {}, password: {} },

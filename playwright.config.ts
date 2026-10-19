@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const PORT = 3100;
+// Next 16 allows one dev server per project, so reuse the normal dev port.
+const PORT = 3000;
 
 export default defineConfig({
   testDir: "e2e",
