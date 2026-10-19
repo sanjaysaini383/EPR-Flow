@@ -9,15 +9,17 @@ B2B SaaS for managing Extended Producer Responsibility (EPR) compliance in India
 ## Stack
 
 Next.js 16 (App Router) · TypeScript · Tailwind v4 + shadcn/ui · PostgreSQL + Prisma 7 · Auth.js v5 · Zod · Vitest · Playwright.
-Production: **Vercel + Neon Postgres**. Docker Compose is only used for local Postgres and Mailpit.
+Hosting: **Vercel + Neon Postgres** — no Docker; local development also runs against Neon.
 
 ## Local setup
 
-Requirements: Node 20+ (24 recommended), Docker Desktop.
+Requirements: Node 20+ (24 recommended) and a free [Neon](https://neon.tech) project.
+
+1. In Neon, create a branch named `dev` (keep `main` for production).
+2. Copy `.env.example` to `.env` and paste the `dev` branch's **pooled** URL into `DATABASE_URL` and its **direct** URL into `DIRECT_URL` (Neon → Connect → toggle "Connection pooling").
+3. Set `AUTH_SECRET` (`npx auth secret`).
 
 ```bash
-cp .env.example .env            # then set AUTH_SECRET:  npx auth secret
-docker compose up -d            # Postgres on :5433, Mailpit on :8025
 npm install                     # also runs `prisma generate`
 npm run db:migrate              # apply migrations
 npm run db:seed                 # categories + demo company
@@ -33,7 +35,7 @@ npm run dev                     # http://localhost:3000
 | consultant@demo.eprflow.in | Consultant |
 | viewer@demo.eprflow.in | Viewer |
 
-Emails sent in development (invitations) are visible in Mailpit at http://localhost:8025.
+With `SMTP_HOST` empty, emails (e.g. invitations) are printed to the dev server console, and the invite link is also shown in the UI.
 
 ### Google login (optional)
 
@@ -45,7 +47,7 @@ Create an OAuth client in Google Cloud Console with redirect URI `http://localho
 |---|---|
 | `npm run dev` | Dev server |
 | `npm test` | Unit tests (Vitest) — domain logic and tenant scoping |
-| `npm run test:e2e` | End-to-end tests (Playwright; needs DB running + seeded, `npx playwright install chromium` once) |
+| `npm run test:e2e` | End-to-end tests (Playwright; needs the seeded Neon `dev` branch, `npx playwright install chromium` once) |
 | `npm run typecheck` / `npm run lint` | Static checks |
 | `npm run db:migrate` | Create/apply migrations in dev |
 | `npm run db:seed` | Seed reference data and the demo company |

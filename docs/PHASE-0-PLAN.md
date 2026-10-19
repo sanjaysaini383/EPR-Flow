@@ -11,22 +11,21 @@ Status: **approved** (defaults accepted; deployment changed to Vercel + Neon). T
 | DB | PostgreSQL 17 + Prisma 7 | `prisma.config.ts`, generated client in `src/generated/prisma` |
 | Auth | Auth.js v5: Credentials (argon2 hash) + Google | JWT session strategy (required for Credentials); org membership resolved per request |
 | Validation | Zod v4 | Shared schemas in `src/lib/validation` used by forms and server |
-| Files | `StorageAdapter` interface → `LocalFsStorage` (dev) / `S3Storage` (MinIO/S3) | Selected by `STORAGE_DRIVER` env |
+| Files | `StorageAdapter` interface → Vercel Blob (default, works locally and on Vercel) / S3-compatible (R2, S3) | Selected by `STORAGE_DRIVER`; Vercel's filesystem is read-only, so no local-disk driver |
 | AI | `@anthropic-ai/sdk`, model from `ANTHROPIC_MODEL` | Structured output validated with Zod before it is stored |
 | Jobs | Vercel Cron → `/api/cron/*` route handlers | Serverless-friendly; idempotent handlers protected by `CRON_SECRET` |
-| Email | Nodemailer (SMTP); Mailpit in Docker for dev | WhatsApp: generate ready-to-send text + `wa.me` link (no API integration yet) |
+| Email | Nodemailer (any SMTP provider); logged to console in dev when SMTP is unset | WhatsApp: generate ready-to-send text + `wa.me` link (no API integration yet) |
 | Excel/CSV | ExcelJS (read + write), papaparse for CSV | |
 | PDF | `@react-pdf/renderer` for reports | |
 | Tests | Vitest (domain logic), Playwright (key flows) | |
 | Package manager | npm | |
 
-**Hosting:** Vercel + Neon Postgres. Runtime uses Neon's pooled URL (`DATABASE_URL`), migrations use the direct URL (`DIRECT_URL`). Long-running work (AI extraction) runs inside route handlers/actions with `after()` and status polling rather than a separate worker. Docker Compose is used only for local Postgres + Mailpit.
+**Hosting:** Vercel + Neon Postgres. Runtime uses Neon's pooled URL (`DATABASE_URL`), migrations use the direct URL (`DIRECT_URL`). Long-running work (AI extraction) runs inside route handlers/actions with `after()` and status polling rather than a separate worker. No Docker: local development also uses Neon (a separate `dev` branch).
 
 ## 2. Folder structure
 
 ```
 eprflow/
-├─ docker-compose.yml          # local dev only: postgres, mailpit
 ├─ prisma/
 │  ├─ schema.prisma
 │  ├─ migrations/
