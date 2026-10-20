@@ -6,6 +6,13 @@ B2B SaaS for managing Extended Producer Responsibility (EPR) compliance in India
 
 **Status:** Phase 1 (foundation) complete. See [docs/PHASE-0-PLAN.md](docs/PHASE-0-PLAN.md) for the full plan.
 
+## Demo
+
+- **Video:** [docs/eprflow-demo.mp4](docs/eprflow-demo.mp4) — a 4-minute captioned walkthrough of everything live today.
+- **Slides:** [docs/EPRFlow-Product-Overview.pptx](docs/EPRFlow-Product-Overview.pptx) — product overview deck (15 slides, with speaker notes).
+- **Demo data:** `npm run db:seed` creates *Demo Consumer Goods* (4 users, 3 GSTINs, 3 brands, 3 plants, audit history, a pending invite) and *GreenPack Industries* (a second client for the consultant account).
+- **Re-record the video:** start the app (`npm run build && npx next start`), then `node scripts/record-demo.mjs`. Output goes to `demo/` (git-ignored).
+
 ## Stack
 
 Next.js 16 (App Router) · TypeScript · Tailwind v4 + shadcn/ui · PostgreSQL + Prisma 7 · Auth.js v5 · Zod · Vitest · Playwright.

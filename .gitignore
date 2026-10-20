@@ -17,3 +17,4 @@ storage/
 *.tsbuildinfo
 next-env.d.ts
 *.pem
+demo/
