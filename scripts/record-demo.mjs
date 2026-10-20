@@ -1,48 +1,48 @@
 /**
- * Records a narrated walkthrough of EPRFlow with Playwright.
+ * Records a ~2 minute product pitch video of EPRFlow with Playwright.
+ * No login screens: sessions are created off-camera and swapped in as cookies.
  *
- *   1. npm run dev            (in another terminal; database seeded with `npm run db:seed`)
+ *   1. npm run build && npm start   (database seeded with `npm run db:seed`)
  *   2. node scripts/record-demo.mjs
  *
- * Output: demo/eprflow-demo.webm (+ screenshots in demo/screens/ used by the slide deck).
- * The run creates one throw-away signup ("Priya Sharma") and removes it at the end.
+ * Output: demo/eprflow-demo.webm (trimmed .mp4 is produced with ffmpeg, see README).
+ * The import step uploads a sample file and discards it, so no data is changed.
  */
 import "dotenv/config";
-import { mkdir, rename, rm } from "node:fs/promises";
+import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import pg from "pg";
 import { chromium } from "playwright";
 
 const BASE = process.env.DEMO_URL ?? "http://localhost:3000";
+const ORG = `${BASE}/o/demo-consumer-goods`;
 const OUT = path.resolve("demo");
-const SCREENS = path.join(OUT, "screens");
 const SIZE = { width: 1440, height: 900 };
 const PASSWORD = "Demo@12345";
-const STAMP = Date.now();
-const NEW_USER = { name: "Priya Sharma", email: `priya.sharma.${STAMP}@example.com`, password: "Sunrise2026Pack" };
 
-// ── Overlay: caption bar + visible cursor, injected on every page load ──────────────
-// Runs through the DevTools protocol, so the app's CSP does not apply to it.
+// ── Overlay: caption bar, visible cursor and full-screen title cards ──────────────
 const OVERLAY = () => {
   const install = () => {
     if (document.getElementById("__demo_caption")) return;
     const style = document.createElement("style");
     style.textContent = `
       #__demo_caption{position:fixed;left:50%;bottom:28px;transform:translateX(-50%);z-index:2147483647;
-        max-width:880px;padding:14px 22px;border-radius:14px;background:rgba(10,30,18,.88);color:#fff;
-        font:500 17px/1.45 system-ui,Segoe UI,sans-serif;box-shadow:0 10px 30px rgba(0,0,0,.25);
-        backdrop-filter:blur(6px);transition:opacity .25s;pointer-events:none}
+        max-width:900px;padding:14px 24px;border-radius:14px;background:rgba(10,30,18,.9);color:#fff;
+        font:500 18px/1.45 system-ui,Segoe UI,sans-serif;box-shadow:0 10px 30px rgba(0,0,0,.25);
+        transition:opacity .25s;pointer-events:none}
       #__demo_caption b{display:block;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#7ee2a0;margin-bottom:2px}
       #__demo_caption:empty{opacity:0}
       #__demo_cursor{position:fixed;z-index:2147483647;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;
-        background:rgba(34,197,94,.35);border:2px solid #16a34a;pointer-events:none;transition:transform .12s, left .05s, top .05s}
+        background:rgba(34,197,94,.35);border:2px solid #16a34a;pointer-events:none;transition:transform .12s}
       #__demo_cursor.down{transform:scale(.7);background:rgba(34,197,94,.7)}
       #__demo_card{position:fixed;inset:0;z-index:2147483646;display:flex;flex-direction:column;align-items:center;
-        justify-content:center;gap:14px;background:radial-gradient(circle at 30% 20%,#1f6f43,#0b2416 70%);color:#fff;
-        font-family:system-ui,Segoe UI,sans-serif;text-align:center;transition:opacity .4s}
-      #__demo_card h1{font-size:54px;margin:0;font-weight:700;letter-spacing:-.02em}
-      #__demo_card p{font-size:22px;margin:0;opacity:.85;max-width:820px}
-      #__demo_card small{font-size:14px;opacity:.6;letter-spacing:.12em;text-transform:uppercase}`;
+        justify-content:center;gap:18px;background:radial-gradient(circle at 30% 20%,#1f6f43,#0b2416 70%);color:#fff;
+        font-family:system-ui,Segoe UI,sans-serif;text-align:center;transition:opacity .4s;padding:0 80px}
+      #__demo_card h1{font-size:60px;margin:0;font-weight:700;letter-spacing:-.02em;line-height:1.1}
+      #__demo_card p{font-size:24px;margin:0;opacity:.88;max-width:900px;line-height:1.45}
+      #__demo_card small{font-size:15px;opacity:.65;letter-spacing:.14em;text-transform:uppercase}
+      #__demo_card ul{list-style:none;padding:0;margin:8px 0 0;display:grid;gap:12px;font-size:22px;text-align:left}
+      #__demo_card li::before{content:"→ ";color:#7ee2a0}`;
     document.head.appendChild(style);
     const cap = document.createElement("div");
     cap.id = "__demo_caption";
@@ -68,7 +68,18 @@ const OVERLAY = () => {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function caption(page, title, text, holdMs = 2600) {
+// Loading gaps (seconds from the start of the recording) cut out of the final video.
+let recordingStart = 0;
+const cuts = [];
+const now = () => (Date.now() - recordingStart) / 1000;
+async function cutWhile(fn) {
+  const from = now() + 0.15;
+  await fn();
+  const to = now() - 0.1;
+  if (to > from) cuts.push([from, to]);
+}
+
+async function caption(page, title, text, holdMs = 3000) {
   const html = title ? `<b>${title}</b>${text}` : "";
   await page.evaluate((h) => {
     sessionStorage.setItem("__demo_caption", h);
@@ -78,277 +89,305 @@ async function caption(page, title, text, holdMs = 2600) {
   await wait(holdMs);
 }
 
-async function titleCard(page, kicker, heading, sub, holdMs = 3200) {
-  await page.evaluate(
-    ([k, h, s]) => {
-      const card = document.createElement("div");
-      card.id = "__demo_card";
-      card.innerHTML = `<small>${k}</small><h1>${h}</h1><p>${s}</p>`;
-      document.body.appendChild(card);
-    },
-    [kicker, heading, sub],
-  );
-  await wait(holdMs);
+async function showCard(page, html) {
+  await page.evaluate((h) => {
+    document.getElementById("__demo_card")?.remove();
+    const card = document.createElement("div");
+    card.id = "__demo_card";
+    card.innerHTML = h;
+    document.body.appendChild(card);
+    document.getElementById("__demo_cursor")?.style.setProperty("display", "none");
+  }, html);
+}
+
+async function hideCard(page) {
   await page.evaluate(() => {
     const c = document.getElementById("__demo_card");
     if (c) c.style.opacity = "0";
   });
   await wait(450);
-  await page.evaluate(() => document.getElementById("__demo_card")?.remove());
+  await page.evaluate(() => {
+    document.getElementById("__demo_card")?.remove();
+    document.getElementById("__demo_cursor")?.style.removeProperty("display");
+  });
 }
 
-/** Moves the visible cursor to an element, then clicks it. */
-async function click(page, locator, pause = 500) {
-  await locator.scrollIntoViewIfNeeded();
-  const box = await locator.boundingBox();
-  if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 18 });
-  await wait(250);
-  await locator.click();
-  await settle(page);
-  await wait(pause);
+async function card(page, html, holdMs) {
+  await showCard(page, html);
+  await wait(holdMs);
+  await hideCard(page);
 }
 
-/** Waits until the page has finished loading data (no loading skeleton on screen). */
 async function settle(page) {
   await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => {});
   await page.locator('[aria-label="Loading"]').waitFor({ state: "detached", timeout: 20_000 }).catch(() => {});
 }
 
-async function type(page, locator, text, delay = 55) {
-  await click(page, locator, 150);
-  await locator.pressSequentially(text, { delay });
+async function moveTo(page, locator) {
+  await locator.scrollIntoViewIfNeeded();
+  const box = await locator.boundingBox();
+  if (box) await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 16 });
+  await wait(200);
+}
+
+async function click(page, locator, pause = 400) {
+  await moveTo(page, locator);
+  await locator.click();
+  await settle(page);
+  await wait(pause);
+}
+
+async function go(page, url, readyText) {
+  await cutWhile(async () => {
+    await page.goto(url);
+    await ready(page, readyText);
+  });
+}
+
+/** Waits for content that only exists once the page has fully streamed in. */
+async function ready(page, text) {
+  if (text) await page.getByText(text, { exact: typeof text === "string" }).first().waitFor({ timeout: 60_000 });
+  await page.waitForFunction(() => !document.querySelector('[aria-label="Loading"]'), null, { timeout: 60_000, polling: 200 });
+  await settle(page);
   await wait(250);
 }
 
-async function shot(page, name) {
-  await page.evaluate(() => {
-    for (const id of ["__demo_caption", "__demo_cursor"]) {
-      const el = document.getElementById(id);
-      if (el) el.style.visibility = "hidden";
-    }
-  });
-  await page.screenshot({ path: path.join(SCREENS, `${name}.png`) });
-  await page.evaluate(() => {
-    for (const id of ["__demo_caption", "__demo_cursor"]) {
-      const el = document.getElementById(id);
-      if (el) el.style.visibility = "";
-    }
-  });
-}
-
-async function login(page, email) {
-  await page.goto(`${BASE}/login`);
-  await type(page, page.getByLabel("Work email"), email, 35);
-  await type(page, page.getByLabel("Password", { exact: true }), PASSWORD, 35);
-  await click(page, page.getByRole("button", { name: "Log in" }));
-  await page.waitForURL(/\/dashboard/, { timeout: 90_000 });
-  await page.getByText("Compliance score").first().waitFor({ timeout: 90_000 });
-}
-
-async function logout(page) {
+/** Clicks a sidebar link and waits for the destination page's content. */
+async function nav(page, name, readyText) {
   await caption(page, "", "", 0);
-  await click(page, page.locator("[data-sidebar=footer] button").first(), 400);
-  await click(page, page.getByRole("menuitem", { name: "Log out" }));
-  await page.waitForURL(/\/login/);
+  const link = page.getByRole("link", { name, exact: typeof name === "string" }).first();
+  await moveTo(page, link);
+  await link.click();
+  await cutWhile(() => ready(page, readyText));
+}
+
+async function smoothScroll(page, dy, steps = 12) {
+  for (let i = 0; i < steps; i++) {
+    await page.mouse.wheel(0, dy / steps);
+    await wait(40);
+  }
+  await wait(300);
+}
+
+/** Logs in off-camera and returns the session cookies. */
+async function sessionCookies(browser, email) {
+  const ctx = await browser.newContext();
+  const p = await ctx.newPage();
+  await p.goto(`${BASE}/login`);
+  await p.getByLabel("Work email").fill(email);
+  await p.getByLabel("Password", { exact: true }).fill(PASSWORD);
+  await p.getByRole("button", { name: "Log in" }).click();
+  await p.waitForURL((u) => !u.pathname.startsWith("/login"), { timeout: 90_000 });
+  const cookies = await ctx.cookies();
+  await ctx.close();
+  return cookies;
+}
+
+async function switchSession(context, cookies) {
+  await context.clearCookies();
+  await context.addCookies(cookies);
 }
 
 async function setTheme(page, name) {
-  await click(page, page.getByRole("button", { name: "Change theme" }).first(), 300);
-  await click(page, page.getByRole("menuitem", { name }), 700);
+  await click(page, page.getByRole("button", { name: "Change theme" }).first(), 200);
+  await click(page, page.getByRole("menuitem", { name }), 500);
 }
 
-async function warmUp() {
-  // Compile every route once so the recording has no dev-server pauses.
-  const routes = ["/", "/login", "/signup", "/onboarding", "/o", "/o/demo-consumer-goods/dashboard",
-    "/o/demo-consumer-goods/settings", "/o/demo-consumer-goods/settings/members", "/o/demo-consumer-goods/audit-log",
-    "/o/demo-consumer-goods/certificates", "/missing-page"];
-  for (const r of routes) await fetch(BASE + r, { redirect: "manual" }).catch(() => {});
+async function warmUp(cookies) {
+  const header = { cookie: cookies.map((c) => `${c.name}=${c.value}`).join("; ") };
+  for (const r of ["/dashboard", "/targets", "/alerts", "/materials", "/materials/import", "/gst", "/settings/budgets", "/audit-log"]) {
+    await fetch(ORG + r, { headers: header }).catch(() => {});
+  }
 }
 
 async function cleanup() {
   const client = new pg.Client({ connectionString: process.env.DIRECT_URL ?? process.env.DATABASE_URL });
   await client.connect();
-  await client.query(
-    `DELETE FROM "Organization" WHERE id IN (SELECT m."organizationId" FROM "Membership" m JOIN "User" u ON u.id = m."userId" WHERE u.email = $1)`,
-    [NEW_USER.email],
-  );
-  await client.query(`DELETE FROM "User" WHERE email = $1`, [NEW_USER.email]);
-  await client.query(`DELETE FROM "Invitation" WHERE email LIKE 'procurement.%@demo.eprflow.in'`);
-  await client.query(`DELETE FROM "AuditLog" WHERE "after"->>'email' LIKE 'procurement.%@demo.eprflow.in'`);
-  await client.query(`DELETE FROM "RateLimit" WHERE key LIKE 'login:%' OR key LIKE 'signup:%' OR key LIKE 'invite%'`);
+  await client.query(`DELETE FROM "ImportBatch" WHERE "fileName" = 'march-dispatch-tamilnadu.csv'`);
+  await client.query(`DELETE FROM "RateLimit" WHERE key LIKE 'login:%' OR key LIKE 'import%'`);
   await client.end();
 }
 
+const SAMPLE_CSV = [
+  "month,category,entity_type,state,quantity,unit,brand,plant,gstin,recycled_content,pre_consumer,notes",
+  "2026-03,Cat I,Brand Owner,Tamil Nadu,12.5,t,FreshBite Snacks,,,,no,Distributor dispatch",
+  "2026-03,Cat II,Brand Owner,Tamil Nadu,8400,kg,FreshBite Snacks,,,,no,",
+  "2026-03,Cat III,Brand Owner,Tamil Nadu,3.2,tonnes,PureGlow Personal Care,,,,no,",
+  "2026-03,Cat II,Brand Owner,TN,2.1,t,HomeShine,,,,no,",
+  "2026-03,Cat IX,Brand Owner,Tamil Nadu,1.4,t,HomeShine,,,,no,Typo in category",
+  "2027-01,Cat I,Brand Owner,Tamil Nadu,5,t,FreshBite Snacks,,,,no,Future month",
+  "2026-03,Cat II,Brand Owner,Tamil Nadu,-40,kg,PureGlow Personal Care,,,,no,Negative quantity",
+  "2026-03,Cat I,Brand Owner,Tamil Nadu,900,boxes,FreshBite Snacks,,,,no,Unknown unit",
+].join("\n");
+
 async function main() {
+  // Never hang: give up if a run takes far longer than a normal recording.
+  setTimeout(() => {
+    console.error("Recording timed out");
+    process.exit(1);
+  }, 8 * 60_000).unref();
   await rm(OUT, { recursive: true, force: true });
-  await mkdir(SCREENS, { recursive: true });
+  await mkdir(OUT, { recursive: true });
+  const csvPath = path.join(OUT, "march-dispatch-tamilnadu.csv");
+  await writeFile(csvPath, SAMPLE_CSV);
   await cleanup();
-  console.log("Warming up routes…");
-  await warmUp();
 
   const browser = await chromium.launch();
-  const context = await browser.newContext({
-    viewport: SIZE,
-    colorScheme: "light",
-    recordVideo: { dir: OUT, size: SIZE },
-  });
+  console.log("Creating sessions…");
+  const admin = await sessionCookies(browser, "admin@demo.eprflow.in");
+  const consultant = await sessionCookies(browser, "consultant@demo.eprflow.in");
+  const ops = await sessionCookies(browser, "ops@eprflow.in");
+  await warmUp(admin);
+
+  const context = await browser.newContext({ viewport: SIZE, colorScheme: "light", recordVideo: { dir: OUT, size: SIZE } });
   await context.addInitScript(OVERLAY);
+  await switchSession(context, admin);
   const page = await context.newPage();
+  recordingStart = Date.now(); // the video timeline starts with the page
+  page.on("dialog", (d) => d.accept());
 
   try {
-    // ── 1. Intro & landing ────────────────────────────────────────────────
-    await page.goto(BASE);
-    await titleCard(page, "Product demo", "EPRFlow", "EPR compliance for Indian producers, importers and brand owners", 3600);
-    await caption(page, "The problem", "Plastic, E-Waste and Battery EPR rules are managed in Excel and email — wrong maths, missed deadlines, fake certificates.", 4200);
-    await shot(page, "01-landing");
-    await page.mouse.wheel(0, 760);
-    await caption(page, "The platform", "Targets, certificate fraud checks, AI invoice extraction, reminders and CPCB-ready reports — in one workspace.", 4200);
-    await page.mouse.wheel(0, -760);
-    await wait(600);
-    await caption(page, "Dark & light mode", "Every screen supports light, dark and system themes.", 1200);
-    await setTheme(page, "Dark");
-    await wait(1200);
-    await shot(page, "02-landing-dark");
-    await setTheme(page, "Light");
+    console.log("1. The problem", now().toFixed(1));
+    // ── 1. The problem (≈12s) ─────────────────────────────────────────────
+    await go(page, `${ORG}/dashboard`, "Compliance score");
+    await showCard(page, `<small>EPR compliance for India</small><h1>EPRFlow</h1><p>Know your obligation. Trust every certificate. Never miss a deadline.</p>`);
+    cuts.unshift([0, now()]);
+    await wait(3600);
+    await showCard(
+      page,
+      `<small>The problem</small><h1>Thousands of Indian brands must<br/>meet EPR targets every year</h1>
+       <p>Plastic, E-Waste and Battery rules (2022) are tracked in Excel and email today —
+       wrong maths, missed CPCB deadlines, fake recycling certificates and crores in Environmental Compensation.</p>`,
+    );
+    await wait(6500);
+    await hideCard(page);
 
-    // ── 2. Sign-up with clear validation ──────────────────────────────────
-    await click(page, page.getByRole("link", { name: "Get started" }).first());
-    await page.waitForURL(/\/signup/);
-    await caption(page, "Sign up", "Creating an account takes seconds. Every field is validated with clear, specific messages.", 2600);
-    await click(page, page.getByRole("button", { name: "Create account" }), 1200);
-    await caption(page, "Clear errors", "Missing or invalid fields are outlined in red with the reason right below.", 2600);
-    await shot(page, "03-signup-errors");
-    await type(page, page.getByLabel("Full name"), NEW_USER.name);
-    await type(page, page.getByLabel("Work email"), NEW_USER.email, 30);
-    await caption(page, "Strong passwords", "A live checklist shows the password rules as you type; common passwords are rejected.", 600);
-    await type(page, page.getByLabel("Password", { exact: true }), NEW_USER.password, 90);
-    await wait(1200);
-    await click(page, page.getByRole("button", { name: "Create account" }));
-    await page.waitForURL(/\/onboarding/, { timeout: 90_000 });
-
-    // ── 3. Onboarding wizard ──────────────────────────────────────────────
-    await caption(page, "Onboarding wizard", "Step 1 — company details: entity type, waste streams, head office, PAN and CPCB registration.", 1800);
-    await type(page, page.getByLabel("Company name"), "Sunrise Foods");
-    await type(page, page.getByLabel("Legal name"), "Sunrise Foods Private Limited", 30);
-    await click(page, page.getByRole("combobox", { name: "Head office state" }), 500);
-    await click(page, page.getByRole("option", { name: "Maharashtra" }), 400);
-    await click(page, page.getByRole("checkbox", { name: /Producer/ }), 250);
-    await click(page, page.getByRole("checkbox", { name: /Brand Owner/ }), 250);
-    await type(page, page.getByLabel("PAN", { exact: true }), "AAECS4321K", 60);
-    await shot(page, "04-onboarding-company");
-    await click(page, page.getByRole("button", { name: "Continue" }), 900);
-
-    await caption(page, "GSTIN validation", "Step 2 — GSTINs are checked with the official checksum and the state is detected automatically.", 1500);
-    await type(page, page.getByLabel("GSTIN"), "27AAECS4321K1Z1", 60);
-    await click(page, page.getByRole("button", { name: "Add", exact: true }), 1400);
-    await page.getByLabel("GSTIN").fill("");
-    const gstin = await page.evaluate(() => {
-      const cs = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-      const f = "27AAECS4321K1Z";
-      let sum = 0;
-      for (let i = 0; i < 14; i++) {
-        const p = cs.indexOf(f[i]) * (i % 2 === 0 ? 1 : 2);
-        sum += Math.floor(p / 36) + (p % 36);
+    console.log("2. Dashboard", now().toFixed(1));
+    // ── 2. Dashboard (≈16s) ───────────────────────────────────────────────
+    await caption(page, "One dashboard", "Compliance score, remaining obligation, Environmental Compensation risk and certificate spend vs budget — live.", 4300);
+    const bars = page.locator(".recharts-bar-rectangle");
+    await smoothScroll(page, 420);
+    await caption(page, "Where you stand", "Progress per plastic category against where you should be today — plus automatic alerts.", 600);
+    if ((await bars.count()) > 4) {
+      for (const i of [4, 10, 16, 22]) {
+        const bar = bars.nth(Math.min(i, (await bars.count()) - 1));
+        await moveTo(page, bar);
+        await wait(700);
       }
-      return f + cs[(36 - (sum % 36)) % 36];
-    });
-    await type(page, page.getByLabel("GSTIN"), gstin, 60);
-    await click(page, page.getByRole("button", { name: "Add", exact: true }), 1200);
-    await shot(page, "05-onboarding-gstin");
-    await click(page, page.getByRole("button", { name: "Continue" }), 800);
-
-    await caption(page, "Brands", "Step 3 — the brands you sell under. Data and reports can be split by brand.", 1200);
-    for (const b of ["Sunrise Snacks", "Morning Oats"]) {
-      await type(page, page.getByLabel("Brand name"), b, 45);
-      await page.keyboard.press("Enter");
-      await wait(400);
     }
-    await click(page, page.getByRole("button", { name: "Create company" }));
-    await page.waitForURL(/\/dashboard/, { timeout: 90_000 });
-    await page.getByText("Compliance score").first().waitFor();
-    await caption(page, "Your workspace", "The company is created and you are its Admin. The dashboard tracks the financial year and setup progress.", 3800);
+    await wait(1800);
+    await smoothScroll(page, -420);
 
-    await click(page, page.getByRole("link", { name: "Audit log" }), 1200);
-    await caption(page, "Audit trail from day one", "Every change is recorded with who made it, when, and from which IP.", 3200);
+    console.log("3. Targets", now().toFixed(1));
+    // ── 3. Targets (≈14s) ─────────────────────────────────────────────────
+    await nav(page, "Targets", "Obligation details");
+    await caption(page, "Automatic EPR targets", "The engine computes each category's target from 2 years of sales data and the applicable CPCB rule.", 4000);
+    await smoothScroll(page, 520);
+    await caption(page, "Transparent maths", "Base quantity, target %, minimum recycling, shortfall and EC risk — with the exact rule version applied.", 4300);
+    await smoothScroll(page, 700);
+    await wait(1500);
 
-    await logout(page);
+    console.log("4. Alerts", now().toFixed(1));
+    // ── 4. Alerts (≈5s) ───────────────────────────────────────────────────
+    await nav(page, /^Alerts/, "Generated from your targets every day and whenever the dashboard is opened.");
+    await caption(page, "Proactive alerts", "“You are 36% behind on Cat II target with 6 months left” — checked daily, before it becomes a penalty.", 4600);
 
-    // ── 4. Established company (Admin) ────────────────────────────────────
-    await caption(page, "An established company", "Now the demo company: 3 GSTINs across states, 3 brands and a team of 4.", 800);
-    await login(page, "admin@demo.eprflow.in");
-    await caption(page, "Dashboard", "FY progress, GST registrations, brands and team at a glance — plus the next steps to complete.", 4000);
-    await shot(page, "06-dashboard-light");
+    console.log("5. Data import with validation", now().toFixed(1));
+    // ── 5. Data import with validation (≈18s) ─────────────────────────────
+    await nav(page, "Materials", "Quantity of packaging and products placed on the market each month.");
+    await caption(page, "Sales data in minutes", "Every tonne placed on market — by month, category, state, brand and plant.", 2600);
+    await caption(page, "", "", 0);
+    await go(page, `${ORG}/materials/import`, "Upload a file");
+    await caption(page, "Bulk import from Excel / CSV", "Upload the sheet you already have — columns are matched automatically.", 1200);
+    await moveTo(page, page.getByText("Drop a file here or click to browse"));
+    await page.locator("#file").setInputFiles(csvPath);
+    await wait(900);
+    const validate = page.getByRole("button", { name: "Validate file" });
+    await moveTo(page, validate);
+    await validate.click();
+    await cutWhile(async () => {
+      await page.waitForURL(/\/materials\/import\/[^/]+$/, { timeout: 60_000 });
+      await ready(page, "Problems found");
+    });
+    await caption(page, "Every problem caught before saving", "Wrong categories, future months, negative quantities and unknown units are flagged row by row.", 3400);
+    await smoothScroll(page, 450);
+    await wait(1800);
+    await smoothScroll(page, -450);
+    const discard = page.getByRole("button", { name: "Discard" });
+    await moveTo(page, discard);
+    await discard.click();
+    await cutWhile(() => page.waitForURL(/\/materials\/import$/, { timeout: 30_000 }));
 
-    await click(page, page.getByRole("link", { name: "Members", exact: true }), 1200);
-    await caption(page, "Team & roles", "Admin, Compliance Manager, Consultant and Viewer — each with clearly defined permissions.", 3000);
-    await type(page, page.getByLabel("Email", { exact: true }), `procurement.${STAMP}@demo.eprflow.in`, 30);
-    await click(page, page.getByRole("button", { name: "Send invite" }), 1800);
-    await caption(page, "Invitations", "Invites go by email, or as a secure one-time link. Tokens are stored hashed and expire in 7 days.", 3200);
-    await shot(page, "07-members");
+    console.log("6. Compliance structure", now().toFixed(1));
+    // ── 6. Compliance structure (≈9s) ─────────────────────────────────────
+    await nav(page, "GST registrations", /^Each GSTIN you invoice from/);
+    await caption(page, "Multi-state, multi-brand", "GSTINs verified with the official checksum, plus brands and plants across states.", 3500);
+    await nav(page, "Budgets", "Set a budget");
+    await caption(page, "Budget control", "Plan certificate purchases per financial year and track spend against it.", 3200);
 
-    await click(page, page.getByRole("link", { name: "Organization", exact: true }), 1200);
-    await caption(page, "Company profile", "Entity types, waste streams, PAN, CIN and CPCB number — validated and used across reports.", 3200);
-    await shot(page, "08-organization");
+    console.log("7. Trust: roles and audit", now().toFixed(1));
+    // ── 7. Trust: roles and audit (≈6s) ───────────────────────────────────
+    await nav(page, "Audit log", "Every change in this organization, who made it and when.");
+    await caption(page, "Audit-ready", "Every change is logged with who, when and from where. Four roles: Admin, Compliance, Consultant, Viewer.", 4000);
 
-    await click(page, page.getByRole("link", { name: "Audit log" }), 1200);
-    await caption(page, "Full history", "Invites, joins, role changes and profile edits — nothing changes without a record.", 3400);
-    await shot(page, "09-audit-log");
-
-    await click(page, page.getByRole("link", { name: "Certificates" }), 1200);
-    await caption(page, "Roadmap", "Materials, targets, certificates, AI extraction and reports are being built next, phase by phase.", 3400);
-    await logout(page);
-
-    // ── 5. Consultant: multiple clients ───────────────────────────────────
-    await caption(page, "Consultants", "One login, many client companies.", 600);
-    await login(page, "consultant@demo.eprflow.in");
+    console.log("8. Consultants", now().toFixed(1));
+    // ── 8. Consultants (≈9s) ──────────────────────────────────────────────
+    await caption(page, "", "", 0);
+    await switchSession(context, consultant);
+    await go(page, `${ORG}/dashboard`, "Compliance score");
+    await caption(page, "Built for consultants too", "EPR consultants manage many client companies from one login.", 1500);
     await click(page, page.locator("[data-sidebar=header] button").first(), 1600);
-    await caption(page, "Switch between clients", "Consultants jump between client organizations — each one's data stays fully isolated.", 2400);
-    await shot(page, "10-consultant-switcher");
-    await click(page, page.getByRole("menuitem", { name: "GreenPack Industries" }));
-    await page.waitForURL(/greenpack-industries/);
-    await caption(page, "GreenPack Industries", "A different client: Producer & Importer, Plastic and E-Waste streams, Gujarat head office.", 3400);
-    await logout(page);
+    const client = page.getByRole("menuitem", { name: "GreenPack Industries" });
+    await moveTo(page, client);
+    await wait(300);
+    await page.keyboard.press("Escape");
+    await go(page, `${BASE}/o/greenpack-industries/dashboard`, "Compliance score");
+    await caption(page, "Isolated client workspaces", "Each client's data is strictly separated at the database layer.", 3000);
 
-    // ── 6. Viewer: read-only ──────────────────────────────────────────────
-    await login(page, "viewer@demo.eprflow.in");
-    await click(page, page.getByRole("link", { name: "Organization", exact: true }), 1000);
-    await caption(page, "Read-only access", "Viewers can see everything relevant but cannot edit — enforced on the server, not just hidden in the UI.", 3600);
-    await click(page, page.getByRole("link", { name: "Audit log" }), 1000);
-    await caption(page, "Role-based access", "Sensitive areas like the audit log are restricted by role.", 2600);
-    await logout(page);
+    console.log("9. Regulation rules", now().toFixed(1));
+    // ── 9. Regulation rules (≈8s) ─────────────────────────────────────────
+    await caption(page, "", "", 0);
+    await switchSession(context, ops);
+    await go(page, `${BASE}/admin/rules`, "Regulation rules");
+    await caption(page, "Rules change? Update once.", "CPCB targets and EC rates are versioned data, not code — every customer recalculates instantly.", 3500);
+    await click(page, page.getByRole("button", { name: "Edit" }).first(), 1800);
+    await page.keyboard.press("Escape");
+    await wait(500);
 
-    // ── 7. Security ───────────────────────────────────────────────────────
-    await caption(page, "Security built in", "Wrong passwords get a clear, non-revealing message; repeated attempts are rate-limited.", 400);
-    await type(page, page.getByLabel("Work email"), "admin@demo.eprflow.in", 30);
-    await type(page, page.getByLabel("Password", { exact: true }), "WrongPass123", 40);
-    await click(page, page.getByRole("button", { name: "Log in" }), 1800);
-    await shot(page, "11-login-error");
-    await wait(1600);
-    await page.goto(`${BASE}/o/demo-consumer-goods/settings/members`);
-    await page.waitForURL(/\/login/);
-    await caption(page, "Protected routes", "Signed-out visitors are sent to login — then returned to the page they asked for.", 3200);
-    await page.goto(`${BASE}/missing-page`);
-    await page.getByRole("heading", { name: "Page not found" }).waitFor();
-    await caption(page, "Friendly errors", "Unknown pages and unexpected errors show helpful screens — never stack traces.", 3000);
-
-    // ── 8. Dark mode tour & close ─────────────────────────────────────────
-    await caption(page, "Dark mode", "Finally, the full app in dark mode.", 300);
-    await login(page, "admin@demo.eprflow.in");
+    console.log("10. Dark mode", now().toFixed(1));
+    // ── 10. Dark mode (≈5s) ───────────────────────────────────────────────
+    await caption(page, "", "", 0);
+    await switchSession(context, admin);
+    await go(page, `${ORG}/dashboard`, "Compliance score");
     await setTheme(page, "Dark");
-    await caption(page, "Dark mode", "The whole app — dashboard, forms and tables — in dark mode.", 3000);
-    await shot(page, "12-dashboard-dark");
-    await click(page, page.getByRole("link", { name: "Members", exact: true }), 1500);
-    await setTheme(page, "Light");
-    await caption(page, "", "", 300);
-    await titleCard(page, "Built on Next.js · PostgreSQL (Neon) · Vercel", "EPRFlow", "Know your obligation. Trust every certificate. Never miss a deadline.", 4200);
+    await caption(page, "Polished & secure", "Light and dark mode, rate-limited logins, CSP headers and encrypted sessions — on Vercel + Neon Postgres.", 4200);
+    await caption(page, "", "", 0);
+
+    console.log("11. Roadmap & close", now().toFixed(1));
+    // ── 11. Roadmap & close (≈15s) ────────────────────────────────────────
+    await card(
+      page,
+      `<small>Coming next</small><h1>From tracking to automation</h1>
+       <ul><li>Certificate marketplace checks &amp; fraud detection</li>
+       <li>AI extraction of invoices and certificates (Claude)</li>
+       <li>CPCB-ready annual returns &amp; deadline reminders</li></ul>`,
+      6000,
+    );
+    await showCard(page, `<small>EPRFlow</small><h1>Compliance that pays for itself</h1><p>One avoided EC penalty covers years of subscription.<br/>Let's make EPR compliance effortless for every Indian brand.</p>`);
+    await wait(5000);
+    cuts.push([now(), 9999]); // nothing after the closing card
   } finally {
     const video = page.video();
     await context.close();
     await browser.close();
     if (video) await rename(await video.path(), path.join(OUT, "eprflow-demo.webm"));
+    // ffmpeg filter that drops the loading gaps, e.g. -vf "$(cat demo/cuts.txt)"
+    const drop = cuts.map(([a, b]) => `between(t,${a.toFixed(2)},${b.toFixed(2)})`).join("+");
+    await writeFile(path.join(OUT, "cuts.txt"), `select='not(${drop})',setpts=N/25/TB`);
     await cleanup();
   }
-  console.log(`Saved ${path.join(OUT, "eprflow-demo.webm")} and screenshots in ${SCREENS}`);
+  const kept = cuts.slice(0, -1).reduce((t, [a, b]) => t - (b - a), cuts.at(-1)[0]);
+  console.log(`Saved ${path.join(OUT, "eprflow-demo.webm")} — about ${kept.toFixed(0)}s after cutting ${cuts.length} loading gaps`);
 }
 
 main().catch((error) => {
