@@ -21,6 +21,8 @@ import {
   TagIcon,
   TargetIcon,
   UsersIcon,
+  WalletIcon,
+  ShieldIcon,
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -68,10 +70,11 @@ const ICONS: Record<NavIcon, LucideIcon> = {
   audit: HistoryIcon,
   settings: SettingsIcon,
   members: UsersIcon,
+  budgets: WalletIcon,
 };
 
 type Org = { id: string; slug: string; name: string; role: Role };
-type User = { name: string | null; email: string; image: string | null };
+type User = { name: string | null; email: string; image: string | null; isPlatformAdmin?: boolean };
 
 export function AppSidebar({ org, orgs, user }: { org: Org; orgs: Org[]; user: User }) {
   const pathname = usePathname();
@@ -184,6 +187,16 @@ function UserMenu({ user }: { user: User }) {
             </SidebarMenuButton>
           </DropdownMenuTrigger>
           <DropdownMenuContent className="min-w-56" side="top" align="start">
+            {user.isPlatformAdmin && (
+              <>
+                <DropdownMenuItem asChild>
+                  <Link href="/admin/rules">
+                    <ShieldIcon /> Platform admin
+                  </Link>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            )}
             <DropdownMenuItem asChild>
               <form action={signOutAction} className="w-full">
                 <button type="submit" className="flex w-full items-center gap-2">

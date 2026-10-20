@@ -89,7 +89,7 @@ function FilterSelect({
   return (
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger aria-label={label} size="sm" className="min-w-36">
-        <SelectValue />
+        <SelectValue>{value === "all" ? allLabel : options.find((o) => o.value === value)?.label}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         {allLabel && <SelectItem value="all">{allLabel}</SelectItem>}

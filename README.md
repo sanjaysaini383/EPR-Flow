@@ -4,7 +4,7 @@ B2B SaaS for managing Extended Producer Responsibility (EPR) compliance in India
 
 > **Regulatory values in seed data are placeholders.** Verify them against the latest CPCB notification before relying on any calculation.
 
-**Status:** Phase 2 (data entry) complete. See [docs/PHASE-0-PLAN.md](docs/PHASE-0-PLAN.md) for the full plan.
+**Status:** Phase 3 (targets, rules & dashboard) complete. See [docs/PHASE-0-PLAN.md](docs/PHASE-0-PLAN.md) for the full plan.
 
 ## Demo
 
@@ -41,6 +41,7 @@ npm run dev                     # http://localhost:3000
 | compliance@demo.eprflow.in | Compliance Manager |
 | consultant@demo.eprflow.in | Consultant |
 | viewer@demo.eprflow.in | Viewer |
+| ops@eprflow.in | Platform admin (edits regulation rules at `/admin/rules`) |
 
 With `SMTP_HOST` empty, emails (e.g. invitations) are printed to the dev server console, and the invite link is also shown in the UI.
 
@@ -80,6 +81,18 @@ Feature code never touches the raw Prisma client. `getOrgContext(orgSlug)` check
 ### Material data import
 
 Upload CSV or Excel (`.xlsx`, up to 5 MB / 5,000 rows) from **Materials → Import**. Files are parsed and validated server-side and nothing is saved until you review the result: every problem is listed with its spreadsheet row, column and value, and the failing rows can be downloaded with an `errors` column to fix and re-upload. Rows that duplicate data already in EPRFlow are rejected so quantities are never double-counted. Validation rules live in [src/lib/domain/materials/import.ts](src/lib/domain/materials/import.ts) and are unit-tested.
+
+### EPR targets & regulation rules
+
+Obligations are computed by a pure engine ([src/lib/domain/obligations/calculate.ts](src/lib/domain/obligations/calculate.ts), unit-tested) from the organisation's material data, approved certificates and the `RegulationRule` table:
+
+- **Base** = average of the previous two FYs placed on market (pre-consumer excluded) — the method and look-back come from the rule's `parameters`.
+- **Target** = base × EPR %; **minimum recycling** = target × recycling %; end-of-life certificates count only toward the rest.
+- **EC risk** = remaining obligation × the category's EC rate; **recycled content** = this FY's quantity × the mandated %.
+
+No regulatory number is hard-coded. Rules are versioned: a platform admin's edit creates a new version, and obligation snapshots store the rule ids they used. **Seeded values are placeholders** (`isVerified = false`, "VERIFY WITH LATEST CPCB NOTIFICATION") and every screen that uses them shows a warning until an admin verifies them.
+
+Alerts ("You are 40% behind on Cat II target with 3 months left") are rebuilt after each dashboard view and daily by Vercel Cron (`/api/cron/compliance`, protected by `CRON_SECRET` — set it in Vercel's env vars).
 
 ### Security measures
 

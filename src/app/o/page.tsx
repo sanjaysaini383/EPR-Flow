@@ -6,7 +6,7 @@ export default async function OrgIndexPage() {
   const user = await requireUser("/o");
   const orgs = await listUserOrganizations(user.id);
 
-  if (orgs.length === 0) redirect("/onboarding");
+  if (orgs.length === 0) redirect(user.isPlatformAdmin ? "/admin/rules" : "/onboarding");
   const target = orgs.find((o) => o.id === user.lastActiveOrgId) ?? orgs[0];
   redirect(`/o/${target.slug}/dashboard`);
 }

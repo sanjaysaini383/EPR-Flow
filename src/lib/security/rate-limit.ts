@@ -28,7 +28,15 @@ type Limit = { limit: number; windowSeconds: number };
  * Atomic fixed-window counter in Postgres (single statement, safe under concurrency).
  * Throws RateLimitError once `limit` is exceeded within the window.
  */
-export async function rateLimit(key: string, { limit, windowSeconds }: Limit): Promise<void> {
+/**
+ * End-to-end tests log in dozens of times from one IP. They may raise limits via
+ * E2E_RATE_LIMIT_MULTIPLIER, which is ignored in production builds.
+ */
+const multiplier =
+  process.env.NODE_ENV !== "production" ? Math.max(1, Number(process.env.E2E_RATE_LIMIT_MULTIPLIER) || 1) : 1;
+
+export async function rateLimit(key: string, { limit: baseLimit, windowSeconds }: Limit): Promise<void> {
+  const limit = baseLimit * multiplier;
   const rows = await prisma.$queryRaw<{ count: number; windowStart: Date }[]>`
     INSERT INTO "RateLimit" ("key", "count", "windowStart")
     VALUES (${key}, 1, now())

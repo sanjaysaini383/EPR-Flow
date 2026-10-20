@@ -142,7 +142,7 @@ async function login(page, email) {
   await type(page, page.getByLabel("Password", { exact: true }), PASSWORD, 35);
   await click(page, page.getByRole("button", { name: "Log in" }));
   await page.waitForURL(/\/dashboard/, { timeout: 90_000 });
-  await page.getByText("Getting started").waitFor({ timeout: 90_000 });
+  await page.getByText("Compliance score").first().waitFor({ timeout: 90_000 });
 }
 
 async function logout(page) {
@@ -265,7 +265,7 @@ async function main() {
     }
     await click(page, page.getByRole("button", { name: "Create company" }));
     await page.waitForURL(/\/dashboard/, { timeout: 90_000 });
-    await page.getByText("Getting started").waitFor();
+    await page.getByText("Compliance score").first().waitFor();
     await caption(page, "Your workspace", "The company is created and you are its Admin. The dashboard tracks the financial year and setup progress.", 3800);
 
     await click(page, page.getByRole("link", { name: "Audit log" }), 1200);

@@ -2,7 +2,7 @@ import "dotenv/config";
 import { randomBytes, createHash } from "node:crypto";
 import { hash } from "@node-rs/argon2";
 import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient, type Role, type WasteStream } from "../src/generated/prisma/client";
+import { PrismaClient, type Prisma, type Role, type WasteStream } from "../src/generated/prisma/client";
 import { gstinCheckDigit } from "../src/lib/domain/gstin";
 
 const prisma = new PrismaClient({
@@ -212,13 +212,18 @@ async function seedDemoHistory(orgId: string, ids: Record<string, string>) {
   console.log(`✓ ${entries.length} audit log entries and 1 pending invitation`);
 }
 
-/** 18 months of plausible placed-on-market data, only if the org has none yet. */
+/** Monthly placed-on-market data from April 2024 to last month (fills gaps only). */
 async function seedMaterialEntries(orgSlug: string, createdById: string) {
   const org = await prisma.organization.findUniqueOrThrow({
     where: { slug: orgSlug },
     include: { brands: true, plants: true, gstRegistrations: true },
   });
-  if ((await prisma.materialEntry.count({ where: { organizationId: org.id } })) > 0) return;
+  // Fill only months the org has no data for, so re-running the seed never duplicates.
+  const existingMonths = new Set(
+    (await prisma.materialEntry.findMany({ where: { organizationId: org.id }, select: { periodMonth: true }, distinct: ["periodMonth"] })).map(
+      (e) => e.periodMonth.toISOString().slice(0, 7),
+    ),
+  );
 
   const cats = Object.fromEntries((await prisma.materialCategory.findMany()).map((c) => [c.code, c.id]));
   const byName = (list: { id: string; name: string }[], name: string) => list.find((x) => x.name === name)?.id ?? null;
@@ -243,9 +248,10 @@ async function seedMaterialEntries(orgSlug: string, createdById: string) {
 
   const now = new Date();
   const months: Date[] = [];
-  for (let d = new Date(Date.UTC(2025, 3, 1)); d < new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)); d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))) {
-    months.push(d);
+  for (let d = new Date(Date.UTC(2024, 3, 1)); d < new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)); d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))) {
+    if (!existingMonths.has(d.toISOString().slice(0, 7))) months.push(d);
   }
+  if (months.length === 0) return;
 
   const data = months.flatMap((month, i) =>
     lines.map(([brand, plant, state, code, base], j) => {
@@ -276,6 +282,180 @@ async function seedMaterialEntries(orgSlug: string, createdById: string) {
   console.log(`✓ ${data.length} material entries for ${org.name} (${months.length} months)`);
 }
 
+const PLACEHOLDER = "VERIFY WITH LATEST CPCB NOTIFICATION";
+
+/** Regulatory values are placeholders: every rule is seeded unverified and flagged in the UI. */
+async function seedRegulationRules() {
+  if ((await prisma.regulationRule.count()) > 0) return;
+  const cat = Object.fromEntries((await prisma.materialCategory.findMany()).map((c) => [c.code, c.id]));
+  const fyStart = (y: number) => new Date(Date.UTC(y, 3, 1));
+  const fyLabel = (y: number) => `${y}-${String((y + 1) % 100).padStart(2, "0")}`;
+  const base = { isVerified: false, notes: PLACEHOLDER, version: 1 };
+  const eprParams = { baseMethod: "AVERAGE_PREVIOUS_YEARS", lookbackYears: 2, deductPreConsumer: true };
+  const rules: Prisma.RegulationRuleCreateManyInput[] = [];
+
+  // Plastic — overall EPR obligation as % of the average of the previous two FYs.
+  rules.push(
+    { ...base, stream: "PLASTIC", ruleType: "EPR_TARGET", value: 70, unit: "PERCENT", effectiveFrom: fyStart(2022), effectiveTo: fyStart(2023), parameters: eprParams, sourceReference: "PWM Rules — EPR Guidelines 2022, Schedule II (placeholder)" },
+    { ...base, stream: "PLASTIC", ruleType: "EPR_TARGET", value: 100, unit: "PERCENT", effectiveFrom: fyStart(2023), parameters: eprParams, sourceReference: "PWM Rules — EPR Guidelines 2022, Schedule II (placeholder)" },
+  );
+  const recycling: Record<string, number[]> = {
+    PLASTIC_CAT_I: [50, 60, 70, 80, 80],
+    PLASTIC_CAT_II: [30, 40, 50, 60, 60],
+    PLASTIC_CAT_III: [30, 40, 50, 60, 60],
+    PLASTIC_CAT_IV: [50, 60, 70, 80, 80],
+  };
+  const recycledContent: Record<string, number[]> = {
+    PLASTIC_CAT_I: [0, 30, 40, 50, 60],
+    PLASTIC_CAT_II: [0, 10, 10, 20, 20],
+    PLASTIC_CAT_III: [0, 5, 5, 10, 10],
+  };
+  for (let i = 0; i < 5; i++) {
+    const y = 2024 + i;
+    const year = { financialYear: fyLabel(y), effectiveFrom: fyStart(y), effectiveTo: fyStart(y + 1), unit: "PERCENT" };
+    for (const [code, values] of Object.entries(recycling)) {
+      rules.push({ ...base, ...year, stream: "PLASTIC", categoryId: cat[code], ruleType: "RECYCLING_TARGET", value: values[i], sourceReference: "PWM Rules — minimum level of recycling (placeholder)" });
+    }
+    for (const [code, values] of Object.entries(recycledContent)) {
+      if (values[i] > 0) {
+        rules.push({ ...base, ...year, stream: "PLASTIC", categoryId: cat[code], ruleType: "RECYCLED_CONTENT", value: values[i], sourceReference: "PWM Rules — mandatory use of recycled plastic (placeholder)" });
+      }
+    }
+  }
+  for (const [code, inrPerKg] of Object.entries({ PLASTIC_CAT_I: 5, PLASTIC_CAT_II: 10, PLASTIC_CAT_III: 10, PLASTIC_CAT_IV: 10 })) {
+    rules.push({ ...base, stream: "PLASTIC", categoryId: cat[code], ruleType: "EC_RATE", value: inrPerKg, unit: "INR_PER_KG", effectiveFrom: fyStart(2022), sourceReference: "CPCB Environmental Compensation guidelines (placeholder)" });
+  }
+  rules.push({ ...base, stream: "PLASTIC", ruleType: "FILING_DEADLINE", value: 0, unit: "DATE", effectiveFrom: fyStart(2022), parameters: { annualReturnDue: "06-30" }, sourceReference: "Annual return due date (placeholder)" });
+
+  // E-waste and batteries — collection targets (placeholders).
+  rules.push(
+    { ...base, stream: "EWASTE", ruleType: "EPR_TARGET", value: 70, unit: "PERCENT", effectiveFrom: fyStart(2023), parameters: { baseMethod: "AVERAGE_PREVIOUS_YEARS", lookbackYears: 1 }, sourceReference: "E-Waste (Management) Rules 2022, Schedule III (placeholder)" },
+    { ...base, stream: "EWASTE", ruleType: "EC_RATE", value: 15, unit: "INR_PER_KG", effectiveFrom: fyStart(2023), sourceReference: "Placeholder" },
+    { ...base, stream: "BATTERY", ruleType: "EPR_TARGET", value: 70, unit: "PERCENT", effectiveFrom: fyStart(2023), parameters: { baseMethod: "AVERAGE_PREVIOUS_YEARS", lookbackYears: 3 }, sourceReference: "Battery Waste Management Rules 2022 (placeholder)" },
+    { ...base, stream: "BATTERY", ruleType: "EC_RATE", value: 20, unit: "INR_PER_KG", effectiveFrom: fyStart(2023), sourceReference: "Placeholder" },
+  );
+
+  await prisma.regulationRule.createMany({ data: rules });
+  console.log(`✓ ${rules.length} regulation rules (placeholders — ${PLACEHOLDER})`);
+}
+
+async function seedPlatformAdmin(password: string) {
+  await prisma.user.upsert({
+    where: { email: "ops@eprflow.in" },
+    update: { isPlatformAdmin: true },
+    create: { email: "ops@eprflow.in", name: "EPRFlow Ops", passwordHash: password, emailVerified: new Date(), isPlatformAdmin: true },
+  });
+  console.log("✓ platform admin ops@eprflow.in");
+}
+
+/** Platform-wide verified recyclers with annual capacity per category. */
+async function seedRecyclers() {
+  const cat = Object.fromEntries((await prisma.materialCategory.findMany()).map((c) => [c.code, c.id]));
+  const recyclers = [
+    { name: "Shree Polymers Recycling Pvt Ltd", cpcbRegistrationNo: "PWP-MH-0412", stateCode: "MH", city: "Bhiwandi", caps: { PLASTIC_CAT_I: 900, PLASTIC_CAT_II: 600 } },
+    { name: "GreenLoop Plastics LLP", cpcbRegistrationNo: "PWP-KA-0177", stateCode: "KA", city: "Hosur Road", caps: { PLASTIC_CAT_II: 700, PLASTIC_CAT_III: 400 } },
+    { name: "Eastern Cement Co-processing Ltd", cpcbRegistrationNo: "PWP-WB-0031", stateCode: "WB", city: "Durgapur", caps: { PLASTIC_CAT_I: 500, PLASTIC_CAT_II: 800, PLASTIC_CAT_III: 1500 } },
+  ];
+  const ids: Record<string, string> = {};
+  for (const r of recyclers) {
+    const existing = await prisma.recycler.findFirst({ where: { cpcbRegistrationNo: r.cpcbRegistrationNo, organizationId: null } });
+    const rec =
+      existing ??
+      (await prisma.recycler.create({
+        data: {
+          name: r.name,
+          cpcbRegistrationNo: r.cpcbRegistrationNo,
+          stateCode: r.stateCode,
+          city: r.city,
+          verificationStatus: "VERIFIED",
+          verifiedAt: new Date(),
+          registrationValidFrom: new Date(Date.UTC(2023, 3, 1)),
+          registrationValidTo: new Date(Date.UTC(2028, 2, 31)),
+        },
+      }));
+    ids[r.cpcbRegistrationNo] = rec.id;
+    for (const fy of ["2025-26", "2026-27"]) {
+      for (const [code, tonnes] of Object.entries(r.caps)) {
+        await prisma.recyclerCapacity.upsert({
+          where: { recyclerId_categoryId_financialYear: { recyclerId: rec.id, categoryId: cat[code], financialYear: fy } },
+          update: {},
+          create: { recyclerId: rec.id, categoryId: cat[code], financialYear: fy, annualCapacityKg: tonnes * 1000 },
+        });
+      }
+    }
+  }
+  console.log(`✓ ${recyclers.length} verified recyclers`);
+  return ids;
+}
+
+/**
+ * Approved certificates sized against the demo company's real targets so the dashboard
+ * tells a story: FY 2025-26 closed with one small shortfall, FY 2026-27 with mixed progress.
+ */
+async function seedCertificates(orgSlug: string, recyclers: Record<string, string>, userId: string) {
+  const org = await prisma.organization.findUniqueOrThrow({ where: { slug: orgSlug } });
+  if ((await prisma.certificate.count({ where: { organizationId: org.id } })) > 0) return;
+  const cat = Object.fromEntries((await prisma.materialCategory.findMany()).map((c) => [c.code, c.id]));
+
+  // Target = average of the two previous FYs at a 100% EPR target, excluding pre-consumer.
+  async function target(code: string, fy: string) {
+    const start = Number(fy.slice(0, 4));
+    const years = [start - 2, start - 1].map((y) => `${y}-${String((y + 1) % 100).padStart(2, "0")}`);
+    const agg = await prisma.materialEntry.aggregate({
+      where: { organizationId: org.id, categoryId: cat[code], financialYear: { in: years }, isPreConsumer: false, deletedAt: null },
+      _sum: { quantityKg: true },
+    });
+    return Number(agg._sum.quantityKg ?? 0) / 2;
+  }
+
+  // [fy, category, share of target, recycler, type, INR/kg, issue date]
+  const plan: [string, string, number, string, "RECYCLING" | "END_OF_LIFE", number, string][] = [
+    ["2025-26", "PLASTIC_CAT_I", 0.75, "PWP-MH-0412", "RECYCLING", 9.5, "2025-12-15"],
+    ["2025-26", "PLASTIC_CAT_I", 0.3, "PWP-WB-0031", "END_OF_LIFE", 4.2, "2026-02-10"],
+    ["2025-26", "PLASTIC_CAT_II", 0.55, "PWP-KA-0177", "RECYCLING", 12, "2026-01-20"],
+    ["2025-26", "PLASTIC_CAT_II", 0.4, "PWP-WB-0031", "END_OF_LIFE", 4.5, "2026-03-05"],
+    ["2025-26", "PLASTIC_CAT_III", 0.45, "PWP-KA-0177", "RECYCLING", 14, "2026-02-25"],
+    ["2025-26", "PLASTIC_CAT_III", 0.45, "PWP-WB-0031", "END_OF_LIFE", 5, "2026-03-20"],
+    ["2026-27", "PLASTIC_CAT_I", 0.42, "PWP-MH-0412", "RECYCLING", 10, "2026-07-18"],
+    ["2026-27", "PLASTIC_CAT_I", 0.12, "PWP-WB-0031", "END_OF_LIFE", 4.4, "2026-09-02"],
+    ["2026-27", "PLASTIC_CAT_II", 0.2, "PWP-KA-0177", "RECYCLING", 12.5, "2026-08-11"],
+    ["2026-27", "PLASTIC_CAT_III", 0.08, "PWP-KA-0177", "RECYCLING", 14.5, "2026-09-24"],
+  ];
+  let n = 0;
+  for (const [fy, code, share, reg, type, inrPerKg, issued] of plan) {
+    const qty = Math.round((await target(code, fy)) * share);
+    if (qty <= 0) continue;
+    n++;
+    const number = `${reg.replace("PWP-", "EPR/")}/${fy.slice(0, 4)}/${String(1000 + n * 37).padStart(6, "0")}`;
+    const date = new Date(`${issued}T00:00:00Z`);
+    await prisma.certificate.create({
+      data: {
+        organizationId: org.id,
+        recyclerId: recyclers[reg],
+        categoryId: cat[code],
+        type,
+        certificateNumber: number,
+        certificateNumberNormalized: number.replace(/[^A-Za-z0-9]/g, "").toUpperCase(),
+        financialYear: fy,
+        quantityKg: qty,
+        issueDate: date,
+        transferDate: date,
+        costInr: Math.round(qty * inrPerKg),
+        pricePerKgInr: inrPerKg,
+        status: "APPROVED",
+        createdById: userId,
+        approvedById: userId,
+        approvedAt: date,
+      },
+    });
+  }
+  for (const [fy, amountInr] of [["2025-26", 4_000_000], ["2026-27", 4_500_000]] as const) {
+    const existing = await prisma.budget.findFirst({ where: { organizationId: org.id, financialYear: fy, categoryId: null } });
+    if (!existing) await prisma.budget.create({ data: { organizationId: org.id, financialYear: fy, amountInr } });
+  }
+  console.log(`✓ ${n} approved certificates and FY budgets for ${org.name}`);
+}
+
 async function main() {
   await seedCategories();
   const { org, ids, password } = await seedDemoCompany();
@@ -283,6 +463,10 @@ async function main() {
   await seedDemoHistory(org.id, ids);
   await seedMaterialEntries("demo-consumer-goods", ids.COMPLIANCE_MANAGER);
   await seedMaterialEntries("greenpack-industries", ids.CONSULTANT);
+  await seedRegulationRules();
+  await seedPlatformAdmin(password);
+  const recyclers = await seedRecyclers();
+  await seedCertificates("demo-consumer-goods", recyclers, ids.ADMIN);
 }
 
 main()

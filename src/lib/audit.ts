@@ -6,7 +6,7 @@ import { getRequestMeta } from "@/lib/security/request";
 type AuditClient = { auditLog: { create(args: { data: Prisma.AuditLogUncheckedCreateInput }): Promise<unknown> } };
 
 export type AuditEntry = {
-  organizationId: string;
+  organizationId: string | null; // null = platform-level action (e.g. regulation rule edit)
   actorId: string | null;
   action: string; // "<entity>.<verb>", e.g. "member.role_change"
   entityType: string;

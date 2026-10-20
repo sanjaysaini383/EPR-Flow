@@ -76,3 +76,10 @@ export async function rememberActiveOrg(user: CurrentUser, orgId: string) {
     await prisma.user.update({ where: { id: user.id }, data: { lastActiveOrgId: orgId } });
   }
 }
+
+/** Platform administrators (EPRFlow staff) only; everyone else gets a 404. */
+export async function requirePlatformAdmin(): Promise<CurrentUser> {
+  const user = await requireUser("/admin/rules");
+  if (!user.isPlatformAdmin) notFound();
+  return user;
+}

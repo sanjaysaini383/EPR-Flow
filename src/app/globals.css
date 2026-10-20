@@ -32,6 +32,14 @@
   --color-warning: var(--warning);
   --color-warning-foreground: var(--warning-foreground);
   --color-brand-soft: var(--brand-soft);
+  --color-series-1: var(--series-1);
+  --color-series-2: var(--series-2);
+  --color-series-3: var(--series-3);
+  --color-series-4: var(--series-4);
+  --color-status-good: var(--status-good);
+  --color-status-warning: var(--status-warning);
+  --color-status-serious: var(--status-serious);
+  --color-status-critical: var(--status-critical);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -74,6 +82,15 @@
   --warning: oklch(0.75 0.16 70);
   --warning-foreground: oklch(0.25 0.05 70);
   --brand-soft: oklch(0.96 0.04 150);
+  /* Chart categorical slots (validated: CVD-safe adjacent order) and fixed status palette. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.627 0.137 150);
@@ -114,6 +131,14 @@
   --warning: oklch(0.8 0.15 75);
   --warning-foreground: oklch(0.25 0.05 70);
   --brand-soft: oklch(0.3 0.06 150);
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);

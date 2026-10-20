@@ -13,6 +13,7 @@ const eslintConfig = defineConfig([
       "src/lib/db/**",
       "src/lib/auth/**",
       "src/lib/security/**",
+      "src/lib/jobs/**",
       "src/auth.ts",
       "src/app/onboarding/**",
       "src/app/(auth)/**",

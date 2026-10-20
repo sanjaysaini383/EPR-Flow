@@ -17,14 +17,15 @@ export type NavIcon =
   | "calendar"
   | "audit"
   | "settings"
-  | "members";
+  | "members"
+  | "budgets";
 
 export const NAV: NavGroup[] = [
   {
     label: "Overview",
     items: [
       { label: "Dashboard", path: "dashboard", icon: "dashboard" },
-      { label: "Alerts", path: "alerts", icon: "alerts", phase: 3 },
+      { label: "Alerts", path: "alerts", icon: "alerts" },
     ],
   },
   {
@@ -39,7 +40,7 @@ export const NAV: NavGroup[] = [
   {
     label: "Compliance",
     items: [
-      { label: "Targets", path: "targets", icon: "targets", phase: 3 },
+      { label: "Targets", path: "targets", icon: "targets" },
       { label: "Certificates", path: "certificates", icon: "certificates", phase: 4 },
       { label: "Recyclers", path: "recyclers", icon: "recyclers", phase: 4 },
       { label: "AI extraction", path: "extractions", icon: "extraction", phase: 5 },
@@ -58,6 +59,7 @@ export const NAV: NavGroup[] = [
     items: [
       { label: "Organization", path: "settings", icon: "settings" },
       { label: "Members", path: "settings/members", icon: "members" },
+      { label: "Budgets", path: "settings/budgets", icon: "budgets" },
     ],
   },
 ];

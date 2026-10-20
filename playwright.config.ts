@@ -22,6 +22,6 @@ export default defineConfig({
     url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 180_000,
-    env: { APP_URL: `http://localhost:${PORT}`, AUTH_URL: `http://localhost:${PORT}` },
+    env: { APP_URL: `http://localhost:${PORT}`, AUTH_URL: `http://localhost:${PORT}`, E2E_RATE_LIMIT_MULTIPLIER: "20" },
   },
 });
