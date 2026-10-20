@@ -435,21 +435,26 @@ model MaterialEntry {
   @@index([organizationId, periodMonth])
 }
 
+/// One uploaded CSV/Excel file. Parsed rows are kept as JSON so the user can preview
+/// errors before committing; the original file moves to object storage in phase 4.
 model ImportBatch {
   id             String       @id @default(cuid())
   organizationId String
-  fileId         String
+  fileId         String? // set once file storage exists (phase 4)
+  fileName       String
+  fileSha256     String
   status         ImportStatus @default(UPLOADED)
   totalRows      Int          @default(0)
   validRows      Int          @default(0)
   errorRows      Int          @default(0)
-  errors         Json? // [{ row, column, message, raw }]
+  rows           Json? // normalised valid rows, ready to insert
+  errors         Json? // [{ row, column, message, value }]
   createdById    String
   createdAt      DateTime     @default(now())
   committedAt    DateTime?
 
   organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  file            StoredFile      @relation(fields: [fileId], references: [id])
+  file            StoredFile?     @relation(fields: [fileId], references: [id])
   materialEntries MaterialEntry[]
 
   @@index([organizationId, createdAt])

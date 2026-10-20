@@ -5,7 +5,10 @@ import {
   isFinancialYear,
   parseFinancialYear,
   recentFinancialYears,
+  checkReportingMonth,
+  parseMonth,
 } from "../financial-year";
+import { formatTonnes, parseNumber, parseUnit, toKg } from "../units";
 
 const d = (iso: string) => new Date(`${iso}T00:00:00Z`);
 
@@ -36,5 +39,49 @@ describe("financial year", () => {
 
   it("lists recent years newest first", () => {
     expect(recentFinancialYears(d("2026-10-19"), 3)).toEqual(["2026-27", "2025-26", "2024-25"]);
+  });
+});
+
+
+describe("parseMonth", () => {
+  it.each([
+    ["2025-07", "2025-07-01"],
+    ["2025/7/15", "2025-07-01"],
+    ["07/2025", "2025-07-01"],
+    ["Jul 2025", "2025-07-01"],
+    ["July-25", "2025-07-01"],
+    ["sept 2025", "2025-09-01"],
+    [45839, "2025-07-01"], // Excel serial for 2025-07-01
+  ])("parses %s", (input, expected) => {
+    expect(parseMonth(input)?.toISOString().slice(0, 10)).toBe(expected);
+  });
+
+  it.each(["2025-13", "Jule 2025", "hello", "", 12])("rejects %s", (input) => {
+    expect(parseMonth(input)).toBeNull();
+  });
+
+  it("rejects future months and months before EPR began", () => {
+    const today = new Date("2026-10-20T00:00:00Z");
+    expect(checkReportingMonth(new Date("2026-10-01T00:00:00Z"), today)).toBeNull();
+    expect(checkReportingMonth(new Date("2026-11-01T00:00:00Z"), today)).toBe("Month cannot be in the future");
+    expect(checkReportingMonth(new Date("2015-01-01T00:00:00Z"), today)).toMatch(/before April 2016/);
+  });
+});
+
+describe("units", () => {
+  it("parses numbers strictly", () => {
+    expect(parseNumber("1,25,000.5")).toBe(125000.5);
+    expect(parseNumber("1e5")).toBeNull();
+    expect(parseNumber("₹100")).toBeNull();
+    expect(parseNumber("-3")).toBeNull();
+  });
+
+  it("converts units and avoids float noise", () => {
+    expect(parseUnit("MT")).toBe("tonne");
+    expect(parseUnit("")).toBe("kg");
+    expect(parseUnit("lbs")).toBeNull();
+    expect(toKg(0.1 + 0.2, "kg")).toBe(0.3);
+    expect(toKg(1.2345, "tonne")).toBe(1234.5);
+    expect(formatTonnes(1234567)).toBe("1,234.567 t");
   });
 });
