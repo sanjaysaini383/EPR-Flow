@@ -13,7 +13,11 @@ export default async function globalTeardown() {
       )`);
     await client.query(`DELETE FROM "User" WHERE email LIKE 'e2e-%@example.com'`);
     await client.query(`DELETE FROM "Invitation" WHERE email LIKE 'invitee-%@example.com'`);
-    await client.query(`DELETE FROM "RateLimit" WHERE key LIKE 'login:%' OR key LIKE 'signup:%' OR key LIKE 'invite%'`);
+    await client.query(`DELETE FROM "MaterialEntry" WHERE notes = 'e2e-test'`);
+    await client.query(`DELETE FROM "ImportBatch" WHERE "fileName" LIKE 'e2e-%' OR "fileName" = 'evil.xlsx'`);
+    await client.query(`DELETE FROM "Brand" WHERE name LIKE 'E2E Brand %'`);
+    await client.query(`DELETE FROM "Plant" WHERE name LIKE 'E2E Plant %'`);
+    await client.query(`DELETE FROM "RateLimit" WHERE key LIKE 'login:%' OR key LIKE 'signup:%' OR key LIKE 'invite%' OR key LIKE 'import%'`);
   } finally {
     await client.end();
   }

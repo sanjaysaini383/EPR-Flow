@@ -212,11 +212,77 @@ async function seedDemoHistory(orgId: string, ids: Record<string, string>) {
   console.log(`✓ ${entries.length} audit log entries and 1 pending invitation`);
 }
 
+/** 18 months of plausible placed-on-market data, only if the org has none yet. */
+async function seedMaterialEntries(orgSlug: string, createdById: string) {
+  const org = await prisma.organization.findUniqueOrThrow({
+    where: { slug: orgSlug },
+    include: { brands: true, plants: true, gstRegistrations: true },
+  });
+  if ((await prisma.materialEntry.count({ where: { organizationId: org.id } })) > 0) return;
+
+  const cats = Object.fromEntries((await prisma.materialCategory.findMany()).map((c) => [c.code, c.id]));
+  const byName = (list: { id: string; name: string }[], name: string) => list.find((x) => x.name === name)?.id ?? null;
+  const gstIn = (state: string) => org.gstRegistrations.find((g) => g.stateCode === state)?.id ?? null;
+
+  // brand, plant, state, category, base tonnes per month
+  const lines =
+    orgSlug === "demo-consumer-goods"
+      ? [
+          ["FreshBite Snacks", "Pune Packaging Unit", "MH", "PLASTIC_CAT_II", 18],
+          ["FreshBite Snacks", "Pune Packaging Unit", "MH", "PLASTIC_CAT_III", 9],
+          ["FreshBite Snacks", "Noida Distribution Centre", "UP", "PLASTIC_CAT_II", 7],
+          ["PureGlow Personal Care", "Bengaluru Filling Plant", "KA", "PLASTIC_CAT_I", 12],
+          ["PureGlow Personal Care", "Bengaluru Filling Plant", "KA", "PLASTIC_CAT_II", 3],
+          ["HomeShine", "Pune Packaging Unit", "MH", "PLASTIC_CAT_I", 6],
+          ["HomeShine", "Noida Distribution Centre", "UP", "PLASTIC_CAT_I", 4],
+        ]
+      : [
+          ["GreenPack Films", null, "GJ", "PLASTIC_CAT_II", 40],
+          ["GreenPack Films", null, "TN", "PLASTIC_CAT_III", 15],
+        ];
+
+  const now = new Date();
+  const months: Date[] = [];
+  for (let d = new Date(Date.UTC(2025, 3, 1)); d < new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)); d = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1))) {
+    months.push(d);
+  }
+
+  const data = months.flatMap((month, i) =>
+    lines.map(([brand, plant, state, code, base], j) => {
+      // Festive-season peak (Oct–Dec) and a small deterministic wobble per line.
+      const m = month.getUTCMonth();
+      const season = m >= 9 && m <= 11 ? 1.25 : m >= 3 && m <= 5 ? 0.9 : 1;
+      const wobble = 1 + (((i * 7 + j * 13) % 11) - 5) / 50;
+      const kg = Math.round((base as number) * 1000 * season * wobble * 1000) / 1000;
+      const fyStart = m >= 3 ? month.getUTCFullYear() : month.getUTCFullYear() - 1;
+      return {
+        organizationId: org.id,
+        categoryId: cats[code as string],
+        entityType: (orgSlug === "demo-consumer-goods" ? "BRAND_OWNER" : "PRODUCER") as "BRAND_OWNER" | "PRODUCER",
+        periodMonth: month,
+        financialYear: `${fyStart}-${String((fyStart + 1) % 100).padStart(2, "0")}`,
+        stateCode: state as string,
+        brandId: byName(org.brands, brand as string),
+        plantId: plant ? byName(org.plants, plant as string) : null,
+        gstRegistrationId: gstIn(state as string),
+        quantityKg: kg.toFixed(3),
+        recycledContentKg: code === "PLASTIC_CAT_I" ? (kg * 0.3).toFixed(3) : null,
+        source: "MANUAL" as const,
+        createdById,
+      };
+    }),
+  );
+  await prisma.materialEntry.createMany({ data });
+  console.log(`✓ ${data.length} material entries for ${org.name} (${months.length} months)`);
+}
+
 async function main() {
   await seedCategories();
   const { org, ids, password } = await seedDemoCompany();
   await seedSecondClient(ids.CONSULTANT, password);
   await seedDemoHistory(org.id, ids);
+  await seedMaterialEntries("demo-consumer-goods", ids.COMPLIANCE_MANAGER);
+  await seedMaterialEntries("greenpack-industries", ids.CONSULTANT);
 }
 
 main()

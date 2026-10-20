@@ -7,6 +7,7 @@ export default defineConfig({
   testDir: "e2e",
   globalTeardown: "./e2e/global-teardown.ts",
   fullyParallel: false,
+  workers: 1, // one dev server compiling on demand: parallel workers just time out
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? "github" : "list",
   timeout: 90_000,

@@ -4,13 +4,13 @@ B2B SaaS for managing Extended Producer Responsibility (EPR) compliance in India
 
 > **Regulatory values in seed data are placeholders.** Verify them against the latest CPCB notification before relying on any calculation.
 
-**Status:** Phase 1 (foundation) complete. See [docs/PHASE-0-PLAN.md](docs/PHASE-0-PLAN.md) for the full plan.
+**Status:** Phase 2 (data entry) complete. See [docs/PHASE-0-PLAN.md](docs/PHASE-0-PLAN.md) for the full plan.
 
 ## Demo
 
 - **Video:** [docs/eprflow-demo.mp4](docs/eprflow-demo.mp4) — a 4-minute captioned walkthrough of everything live today.
 - **Slides:** [docs/EPRFlow-Product-Overview.pptx](docs/EPRFlow-Product-Overview.pptx) — product overview deck (15 slides, with speaker notes).
-- **Demo data:** `npm run db:seed` creates *Demo Consumer Goods* (4 users, 3 GSTINs, 3 brands, 3 plants, audit history, a pending invite) and *GreenPack Industries* (a second client for the consultant account).
+- **Demo data:** `npm run db:seed` creates *Demo Consumer Goods* (4 users, 3 GSTINs, 3 brands, 3 plants, 18 months of material data, audit history, a pending invite) and *GreenPack Industries* (a second client for the consultant account).
 - **Re-record the video:** start the app (`npm run build && npx next start`), then `node scripts/record-demo.mjs`. Output goes to `demo/` (git-ignored).
 
 ## Stack
@@ -76,6 +76,10 @@ e2e/                 Playwright specs
 ### Tenant isolation
 
 Feature code never touches the raw Prisma client. `getOrgContext(orgSlug)` checks membership (non-members get a 404) and returns `db`, a client that injects `organizationId` into every query and rejects writes to other tenants — see [src/lib/db/tenant-scope.ts](src/lib/db/tenant-scope.ts) and its tests. An ESLint rule blocks importing `@/lib/db/client` outside auth/onboarding code.
+
+### Material data import
+
+Upload CSV or Excel (`.xlsx`, up to 5 MB / 5,000 rows) from **Materials → Import**. Files are parsed and validated server-side and nothing is saved until you review the result: every problem is listed with its spreadsheet row, column and value, and the failing rows can be downloaded with an `errors` column to fix and re-upload. Rows that duplicate data already in EPRFlow are rejected so quantities are never double-counted. Validation rules live in [src/lib/domain/materials/import.ts](src/lib/domain/materials/import.ts) and are unit-tested.
 
 ### Security measures
 

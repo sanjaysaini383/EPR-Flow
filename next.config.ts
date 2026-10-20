@@ -16,7 +16,8 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   serverExternalPackages: ["@node-rs/argon2"],
   experimental: {
-    serverActions: { bodySizeLimit: "1mb" },
+    // Spreadsheet uploads are capped at 5 MB in lib/files/spreadsheet.ts.
+    serverActions: { bodySizeLimit: "6mb" },
   },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];

@@ -19,6 +19,7 @@ export const LIMITS = {
   signupPerIp: { limit: 5, windowSeconds: 60 * 60 },
   invitePerOrg: { limit: 30, windowSeconds: 60 * 60 },
   acceptInvitePerIp: { limit: 20, windowSeconds: 15 * 60 },
+  importPerOrg: { limit: 60, windowSeconds: 60 * 60 },
 } as const;
 
 type Limit = { limit: number; windowSeconds: number };

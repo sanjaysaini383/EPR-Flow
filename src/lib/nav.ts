@@ -30,10 +30,10 @@ export const NAV: NavGroup[] = [
   {
     label: "Data",
     items: [
-      { label: "Materials", path: "materials", icon: "materials", phase: 2 },
-      { label: "Brands", path: "brands", icon: "brands", phase: 2 },
-      { label: "Plants", path: "plants", icon: "plants", phase: 2 },
-      { label: "GST registrations", path: "gst", icon: "gst", phase: 2 },
+      { label: "Materials", path: "materials", icon: "materials" },
+      { label: "Brands", path: "brands", icon: "brands" },
+      { label: "Plants", path: "plants", icon: "plants" },
+      { label: "GST registrations", path: "gst", icon: "gst" },
     ],
   },
   {

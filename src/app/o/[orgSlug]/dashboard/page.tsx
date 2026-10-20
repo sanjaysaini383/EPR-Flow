@@ -1,9 +1,9 @@
 import {
   ArrowRightIcon,
-  CalendarRangeIcon,
   CheckCircle2Icon,
   CircleIcon,
   GaugeIcon,
+  PackageIcon,
   ReceiptIndianRupeeIcon,
   TagIcon,
   UsersIcon,
@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { getOrgContext } from "@/lib/auth/session";
 import { financialYearOf, financialYearProgress } from "@/lib/domain/financial-year";
+import { formatTonnes } from "@/lib/domain/units";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Dashboard" };
@@ -23,15 +24,16 @@ export default async function DashboardPage({ params }: PageProps<"/o/[orgSlug]/
   const { orgSlug } = await params;
   const { org, db, user } = await getOrgContext(orgSlug);
 
-  const [gstCount, brandCount, memberCount, materialCount] = await Promise.all([
+  const now = new Date();
+  const fy = financialYearOf(now);
+  const [gstCount, brandCount, memberCount, materialCount, fyTotal] = await Promise.all([
     db.gstRegistration.count({ where: { archivedAt: null } }),
     db.brand.count({ where: { archivedAt: null } }),
     db.membership.count(),
     db.materialEntry.count({ where: { deletedAt: null } }),
+    db.materialEntry.aggregate({ where: { deletedAt: null, financialYear: fy }, _sum: { quantityKg: true }, _count: true }),
   ]);
 
-  const now = new Date();
-  const fy = financialYearOf(now);
   const fyElapsed = Math.round(financialYearProgress(fy, now) * 100);
   const monthsLeft = Math.max(0, Math.ceil(((100 - fyElapsed) / 100) * 12));
 
@@ -67,10 +69,16 @@ export default async function DashboardPage({ params }: PageProps<"/o/[orgSlug]/
       </section>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard icon={CalendarRangeIcon} label="Financial year" value={fy} hint={`${fyElapsed}% elapsed`} />
-        <StatCard icon={ReceiptIndianRupeeIcon} label="GST registrations" value={gstCount} hint="Across all states" />
-        <StatCard icon={TagIcon} label="Brands" value={brandCount} hint="Active brands" />
-        <StatCard icon={UsersIcon} label="Team members" value={memberCount} hint="With access to this org" />
+        <StatCard
+          icon={PackageIcon}
+          label={`Placed on market · FY ${fy}`}
+          value={formatTonnes(fyTotal._sum.quantityKg?.toString() ?? 0)}
+          hint={`${fyTotal._count} entr${fyTotal._count === 1 ? "y" : "ies"} so far`}
+          href={`/o/${org.slug}/materials?fy=${fy}`}
+        />
+        <StatCard icon={ReceiptIndianRupeeIcon} label="GST registrations" value={gstCount} hint="Across all states" href={`/o/${org.slug}/gst`} />
+        <StatCard icon={TagIcon} label="Brands" value={brandCount} hint="Active brands" href={`/o/${org.slug}/brands`} />
+        <StatCard icon={UsersIcon} label="Team members" value={memberCount} hint="With access to this org" href={`/o/${org.slug}/settings/members`} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr]">
@@ -152,9 +160,29 @@ function ProgressBar({ value, label }: { value: number; label: string }) {
   );
 }
 
-function StatCard({ icon: Icon, label, value, hint }: { icon: LucideIcon; label: string; value: string | number; hint: string }) {
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  hint,
+  href,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string | number;
+  hint: string;
+  href: string;
+}) {
   return (
-    <Card className="gap-3">
+    <Link href={href} className="rounded-xl transition-shadow hover:shadow-md focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none">
+      <StatCardBody icon={Icon} label={label} value={value} hint={hint} />
+    </Link>
+  );
+}
+
+function StatCardBody({ icon: Icon, label, value, hint }: { icon: LucideIcon; label: string; value: string | number; hint: string }) {
+  return (
+    <Card className="h-full gap-3">
       <CardHeader className="flex flex-row items-center justify-between">
         <CardDescription>{label}</CardDescription>
         <span className="flex size-8 items-center justify-center rounded-lg bg-brand-soft text-primary">
