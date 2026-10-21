@@ -4,7 +4,7 @@ B2B SaaS for managing Extended Producer Responsibility (EPR) compliance in India
 
 > **Regulatory values in seed data are placeholders.** Verify them against the latest CPCB notification before relying on any calculation.
 
-**Status:** Phases 1–3 and 6 (reports, calendar & reminders) complete; Phases 4–5 (certificates, AI extraction) are next. See [docs/PHASE-0-PLAN.md](docs/PHASE-0-PLAN.md) for the full plan.
+**Status:** Phases 1–6 complete (foundation, data entry, targets, certificates & fraud checks, AI extraction, reports & reminders). See [docs/PHASE-0-PLAN.md](docs/PHASE-0-PLAN.md) for the full plan.
 
 ## Demo
 
@@ -93,6 +93,35 @@ Obligations are computed by a pure engine ([src/lib/domain/obligations/calculate
 No regulatory number is hard-coded. Rules are versioned: a platform admin's edit creates a new version, and obligation snapshots store the rule ids they used. **Seeded values are placeholders** (`isVerified = false`, "VERIFY WITH LATEST CPCB NOTIFICATION") and every screen that uses them shows a warning until an admin verifies them.
 
 Alerts ("You are 40% behind on Cat II target with 3 months left") are rebuilt after each dashboard view and daily by Vercel Cron (`/api/cron/compliance`, protected by `CRON_SECRET` — set it in Vercel's env vars).
+
+### Certificates & fraud checks
+
+Certificates move through **Draft → Awaiting approval → Approved / Rejected**; only Admins approve, and only approved certificates count towards targets. Every save, submit and approval runs the checks in [src/lib/domain/fraud/checks.ts](src/lib/domain/fraud/checks.ts) (pure, unit-tested):
+
+| Check | Severity |
+|---|---|
+| Same number already claimed by another organisation on EPRFlow (never says which) | High |
+| Identical file (SHA-256) already attached elsewhere | High |
+| Recycler suspended, or registration expired before the issue date | High |
+| Recycler's certificates for the category/FY, across all buyers, exceed its registered capacity | High |
+| Recycler unverified / not registered for the category | Medium |
+| Issue date in the future or outside the FY, before the recycler's registration, transfer before issue | Medium |
+| Price per kg more than 50% from the platform median (≥ 5 samples) | Low |
+
+Approval is blocked while a **high** flag is open; flags can be dismissed with a note (kept in the audit log), and resolve themselves when the condition goes away. Cross-tenant checks read only aggregates. The daily cron re-checks open certificates.
+
+**Files** (certificate PDFs, invoices) are checked by their bytes, not their name (PDF/PNG/JPEG/WebP, 4 MB — Vercel's request limit is 4.5 MB), fingerprinted, and stored privately: Vercel Blob with `access: "private"` in production, Postgres (`STORAGE_DRIVER=database`) locally. They are streamed only to members of the owning organisation via `/o/[org]/files/[id]`.
+
+The **recycler directory** shows verification, capacity use across EPRFlow, ratings and your price history; teams can add private (unverified) recyclers, and platform admins verify recyclers and set capacity at `/admin/recyclers`.
+
+### AI extraction
+
+`/o/[org]/extractions`: upload an EPR certificate or an invoice; Claude reads it after the upload responds (`after()`), and the reviewer checks every value next to the document. Low-confidence fields and the model's warnings are listed; nothing is saved until the reviewer approves — certificates become drafts (then the normal approval and fraud checks), invoice lines become material entries (source "AI").
+
+- Model: `ANTHROPIC_MODEL` (default `claude-opus-5-5`), structured outputs validated with Zod, server-side refusal fallback enabled; token usage is stored per document.
+- Without `ANTHROPIC_API_KEY` the upload still works and the values are entered by hand.
+- `AI_PROVIDER=fake` (development only) returns fixed sample data; the e2e tests use it.
+- Uploads are rate-limited (100 per organisation per hour) because each one is a paid API call.
 
 ### Reports
 

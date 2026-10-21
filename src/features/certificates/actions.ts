@@ -64,6 +64,14 @@ export async function saveCertificateAction(orgSlug: string, id: string | null, 
       };
     }
 
+    // Saved from the AI review screen: reuse the extracted document and close the extraction.
+    const extractionId = formData.get("extractionId");
+    const extraction =
+      typeof extractionId === "string" && ID.test(extractionId)
+        ? await db.extraction.findFirst({ where: { id: extractionId, target: "CERTIFICATE", status: { in: ["NEEDS_REVIEW", "FAILED"] } } })
+        : null;
+    if (extractionId && !extraction) return { error: "This document has already been reviewed." };
+
     const upload = formData.get("file");
     const file =
       upload instanceof File && upload.size > 0
@@ -84,7 +92,8 @@ export async function saveCertificateAction(orgSlug: string, id: string | null, 
       costInr: data.cost === null ? null : data.cost.toFixed(2),
       pricePerKgInr: data.pricePerKgInr === null ? null : data.pricePerKgInr.toFixed(4),
       notes: data.notes ?? null,
-      ...(file ? { fileId: file.id } : {}),
+      ...(file ? { fileId: file.id } : extraction ? { fileId: extraction.fileId } : {}),
+      ...(extraction ? { extractionId: extraction.id } : {}),
     };
     const workflow = submit
       ? { status: "PENDING_APPROVAL" as const, submittedAt: new Date(), submittedById: user.id }
@@ -105,6 +114,10 @@ export async function saveCertificateAction(orgSlug: string, id: string | null, 
       });
       if (submit) {
         await audit(tx, { organizationId: org.id, actorId: user.id, action: "certificate.submit", entityType: "Certificate", entityId: cert.id });
+      }
+      if (extraction) {
+        await tx.extraction.update({ where: { id: extraction.id }, data: { status: "APPROVED", reviewedById: user.id, reviewedAt: new Date(), reviewed: values as never } });
+        await audit(tx, { organizationId: org.id, actorId: user.id, action: "extraction.approve", entityType: "Extraction", entityId: extraction.id, after: { certificateId: cert.id } });
       }
       return cert;
     });

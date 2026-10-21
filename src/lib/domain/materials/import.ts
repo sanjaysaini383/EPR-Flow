@@ -130,7 +130,8 @@ const ENTITY_ALIASES: Record<string, string> = {
   bo: "BRAND_OWNER",
 };
 
-function matchState(raw: unknown) {
+/** State from a code ("MH") or name ("Maharashtra"), case- and space-insensitive. */
+export function matchState(raw: unknown) {
   const v = norm(raw);
   return INDIAN_STATES.find((s) => norm(s.code) === v || norm(s.name) === v)?.code ?? null;
 }

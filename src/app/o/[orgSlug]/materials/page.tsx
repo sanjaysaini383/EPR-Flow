@@ -42,7 +42,7 @@ export default async function MaterialsPage({ params, searchParams }: PageProps<
     ...(one(sp.category) ? { categoryId: one(sp.category) } : {}),
     ...(one(sp.state) ? { stateCode: one(sp.state) } : {}),
     ...(one(sp.brand) ? { brandId: one(sp.brand) } : {}),
-    ...(one(sp.source) === "MANUAL" || one(sp.source) === "IMPORT" ? { source: one(sp.source) as "MANUAL" | "IMPORT" } : {}),
+    ...(["MANUAL", "IMPORT", "AI_EXTRACTION"].includes(one(sp.source) ?? "") ? { source: one(sp.source) as "MANUAL" | "IMPORT" | "AI_EXTRACTION" } : {}),
   };
 
   const [entries, total, byCategory, categories, brands, totalAll] = await Promise.all([
@@ -178,7 +178,7 @@ export default async function MaterialsPage({ params, searchParams }: PageProps<
                     <div className="text-xs text-muted-foreground">{formatKg(e.quantityKg.toString())}</div>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={e.source === "IMPORT" ? "outline" : "secondary"}>{e.source === "IMPORT" ? "Import" : "Manual"}</Badge>
+                    <Badge variant={e.source === "MANUAL" ? "secondary" : "outline"}>{e.source === "IMPORT" ? "Import" : e.source === "AI_EXTRACTION" ? "AI" : "Manual"}</Badge>
                   </TableCell>
                   {canEdit && (
                     <TableCell>

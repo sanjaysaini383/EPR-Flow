@@ -53,6 +53,7 @@ export function MaterialFilters({
         options={[
           { value: "MANUAL", label: "Manual" },
           { value: "IMPORT", label: "Import" },
+          { value: "AI_EXTRACTION", label: "AI extraction" },
         ]}
         allLabel="All sources"
         onChange={(v) => set("source", v)}

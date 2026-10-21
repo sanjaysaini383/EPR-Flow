@@ -47,12 +47,15 @@ export function CertificateForm({
   options,
   defaults,
   today,
+  extractionId,
 }: {
   orgSlug: string;
   certificateId?: string;
   options: CertificateFormOptions;
   defaults: CertificateDefaults;
   today: string;
+  /** Set on the AI review screen: the extracted document is attached automatically. */
+  extractionId?: string;
 }) {
   const [state, onSubmit, pending] = useFormAction(saveCertificateAction.bind(null, orgSlug, certificateId ?? null), {} as ActionState);
   const e = state.fieldErrors;
@@ -80,6 +83,7 @@ export function CertificateForm({
       <Card>
         <CardContent className="grid gap-6">
           <FormError message={state.error} />
+          {extractionId && <input type="hidden" name="extractionId" value={extractionId} />}
 
           <section className="grid gap-4 sm:grid-cols-2">
             <FormField label="Certificate number" htmlFor="certificateNumber" error={e?.certificateNumber} required hint="As printed on the certificate">
@@ -218,7 +222,13 @@ export function CertificateForm({
               label="Certificate file"
               htmlFor="file"
               error={e?.file}
-              hint={defaults.fileName ? `Attached: ${defaults.fileName}. Choose a file to replace it.` : "PDF, PNG or JPEG, up to 4 MB. Checked for duplicates."}
+              hint={
+                defaults.fileName
+                  ? `Attached: ${defaults.fileName}. Choose a file to replace it.`
+                  : extractionId
+                    ? "The uploaded document is attached automatically."
+                    : "PDF, PNG or JPEG, up to 4 MB. Checked for duplicates."
+              }
             >
               <Input id="file" name="file" type="file" accept="application/pdf,image/png,image/jpeg,.pdf,.png,.jpg,.jpeg" />
             </FormField>
