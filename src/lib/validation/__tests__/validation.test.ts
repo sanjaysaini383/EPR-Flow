@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { safeCallbackUrl, signupSchema } from "../auth";
 import { cleanText } from "../common";
+import { deadlineSchema } from "../deadline";
 import { organizationDetailsSchema } from "../organization";
 
 const cp = (n: number) => String.fromCodePoint(n);
@@ -60,5 +61,38 @@ describe("organizationDetailsSchema", () => {
     expect(organizationDetailsSchema.parse({ ...base, wasteStreams: ["PLASTIC", "PLASTIC"] }).wasteStreams).toEqual([
       "PLASTIC",
     ]);
+  });
+});
+
+describe("deadline form", () => {
+  const now = new Date("2026-10-20T06:00:00Z");
+  const schema = deadlineSchema(now);
+  const base = { title: "Board review", dueDate: "2026-11-15", reminderDays: ["7", "1", "7"] };
+
+  it("accepts a valid deadline and normalises reminder days", () => {
+    const r = schema.safeParse(base);
+    expect(r.success).toBe(true);
+    if (r.success) {
+      expect(r.data.dueDate).toEqual(new Date("2026-11-15T00:00:00Z"));
+      expect(r.data.reminderDays).toEqual([7, 1]);
+    }
+  });
+
+  it("rejects impossible, missing and out-of-range dates", () => {
+    const err = (dueDate: string) => schema.safeParse({ ...base, dueDate }).error?.issues[0].message;
+    expect(err("2026-02-30")).toBe("This date does not exist");
+    expect(err("")).toBe("Choose a due date");
+    expect(err("2024-01-01")).toBe("The due date can be at most one year in the past");
+    expect(err("2035-01-01")).toBe("The due date can be at most five years ahead");
+  });
+
+  it("only allows reminder offsets from the list", () => {
+    expect(schema.safeParse({ ...base, reminderDays: ["5"] }).success).toBe(false);
+    expect(schema.safeParse({ ...base, reminderDays: [] }).success).toBe(true);
+  });
+
+  it("strips hidden characters from the title", () => {
+    const r = schema.safeParse({ ...base, title: "Board​ review‮" });
+    expect(r.success && r.data.title).toBe("Board review");
   });
 });

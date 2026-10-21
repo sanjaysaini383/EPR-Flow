@@ -24,6 +24,8 @@ export const PERMISSIONS = {
   "budgets.manage": ["ADMIN"],
   "flags.dismiss": EDITORS,
   "audit.view": EDITORS,
+  "reports.export": ALL,
+  "deadlines.manage": EDITORS,
 } as const satisfies Record<string, readonly Role[]>;
 
 export type Permission = keyof typeof PERMISSIONS;

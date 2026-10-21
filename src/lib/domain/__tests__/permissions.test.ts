@@ -9,9 +9,11 @@ describe("permissions", () => {
     expect(can("CONSULTANT", "members.manage")).toBe(false);
   });
 
-  it("viewers can view but never write", () => {
+  it("viewers can view and export reports but never write", () => {
     expect(can("VIEWER", "org.view")).toBe(true);
-    const writes = Object.keys(PERMISSIONS).filter((p) => p !== "org.view") as (keyof typeof PERMISSIONS)[];
+    expect(can("VIEWER", "reports.export")).toBe(true);
+    const readOnly = new Set(["org.view", "reports.export"]);
+    const writes = Object.keys(PERMISSIONS).filter((p) => !readOnly.has(p)) as (keyof typeof PERMISSIONS)[];
     for (const p of writes) expect(can("VIEWER", p)).toBe(false);
   });
 

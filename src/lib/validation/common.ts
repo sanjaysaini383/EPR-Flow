@@ -30,7 +30,8 @@ export function text(label: string, { min = 1, max }: { min?: number; max: numbe
     .pipe(
       z
         .string()
-        .min(min, min <= 1 ? `${label} is required` : `${label} must be at least ${min} characters`)
+        .min(1, `${label} is required`) // an empty field says "required" before any length rule
+        .min(min, `${label} must be at least ${min} characters`)
         .max(max, `${label} must be at most ${max} characters`)
         .refine((v) => !/[\r\n]/.test(v), `${label} must be a single line`),
     );

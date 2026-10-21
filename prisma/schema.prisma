@@ -690,13 +690,19 @@ model Deadline {
   financialYear  String?
   stream         WasteStream?
   ruleId         String? // generated from a FILING_DEADLINE rule, or null if custom
+  dedupeKey      String? // "statutory:<stream>:<key>:<fy>" for generated deadlines; null for custom ones
+  reminderDays   Int[]          @default([30, 7, 1]) // email reminders this many days before the due date
   status         DeadlineStatus @default(UPCOMING)
   completedAt    DateTime?
+  completedById  String?
+  createdById    String?
   createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @default(now()) @updatedAt
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   reminders    Reminder[]
 
+  @@unique([organizationId, dedupeKey])
   @@index([organizationId, dueDate])
 }
 
@@ -706,6 +712,7 @@ model Reminder {
   deadlineId     String
   channel        ReminderChannel
   recipient      String // email or phone
+  offsetDays     Int // days before the due date
   sendAt         DateTime
   sentAt         DateTime?
   status         ReminderStatus  @default(SCHEDULED)
@@ -714,6 +721,7 @@ model Reminder {
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   deadline     Deadline     @relation(fields: [deadlineId], references: [id], onDelete: Cascade)
 
+  @@unique([deadlineId, channel, recipient, offsetDays])
   @@index([status, sendAt])
 }
 
@@ -741,13 +749,18 @@ model Report {
   organizationId String
   type           ReportType
   financialYear  String?
-  format         String // "XLSX" | "PDF"
-  fileId         String
+  format         String // "XLSX" | "PDF" | "CSV"
+  fileName       String
+  sha256         String // fingerprint of the generated file, so a shared copy can be matched to this record
+  sizeBytes      Int
+  fileId         String? // set when the file is archived to storage; reports are otherwise regenerated on demand
   generatedById  String
   createdAt      DateTime   @default(now())
 
   organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  file         StoredFile   @relation(fields: [fileId], references: [id])
+  file         StoredFile?  @relation(fields: [fileId], references: [id])
+
+  @@index([organizationId, createdAt])
 }
 
 /// Append-only. Written in the same transaction as the change it records.
