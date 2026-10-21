@@ -1,6 +1,7 @@
 import {
   ArrowRightIcon,
   BellIcon,
+  CalendarClockIcon,
   CheckCircle2Icon,
   CircleIcon,
   InfoIcon,
@@ -17,8 +18,11 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { MonthlyChart, type MonthlyRow } from "@/features/compliance/components/monthly-chart";
 import { ObligationBars } from "@/features/compliance/components/obligation-bars";
 import { StatusBadge } from "@/features/compliance/components/status-badge";
+import { syncDeadlines } from "@/features/calendar/service";
 import { computeCompliance, syncCompliance } from "@/features/compliance/service";
 import { getOrgContext } from "@/lib/auth/session";
+import { formatDueDate } from "@/lib/domain/deadlines/messages";
+import { deadlineState, describeDaysLeft } from "@/lib/domain/deadlines/schedule";
 import { financialYearOf, formatMonth } from "@/lib/domain/financial-year";
 import type { ObligationStatus } from "@/lib/domain/obligations/calculate";
 import { formatTonnes } from "@/lib/domain/units";
@@ -43,7 +47,7 @@ export default async function DashboardPage({ params }: PageProps<"/o/[orgSlug]/
   const fy = financialYearOf(now);
   const since = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 12, 1));
 
-  const [result, gstCount, brandCount, memberCount, materialCount, fyTotal, monthly, alerts, budget] = await Promise.all([
+  const [result, gstCount, brandCount, memberCount, materialCount, fyTotal, monthly, alerts, budget, deadlines] = await Promise.all([
     computeCompliance(db, org, fy, now),
     db.gstRegistration.count({ where: { archivedAt: null } }),
     db.brand.count({ where: { archivedAt: null } }),
@@ -61,8 +65,12 @@ export default async function DashboardPage({ params }: PageProps<"/o/[orgSlug]/
       take: 4,
     }),
     db.budget.findFirst({ where: { financialYear: fy, categoryId: null } }),
+    db.deadline.findMany({ where: { status: "UPCOMING" }, orderBy: { dueDate: "asc" }, take: 3 }),
   ]);
-  after(() => syncCompliance(db, org, result, now));
+  after(async () => {
+    await syncCompliance(db, org, result, now);
+    await syncDeadlines(db, org, now);
+  });
 
   const firstName = user.name?.split(" ")[0];
   const fyElapsed = result.fyProgress;
@@ -190,45 +198,87 @@ export default async function DashboardPage({ params }: PageProps<"/o/[orgSlug]/
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <BellIcon className="size-4 text-primary" /> Alerts
-            </CardTitle>
-            <CardDescription>What needs attention now.</CardDescription>
-            <CardAction>
-              <Button asChild variant="ghost" size="sm">
-                <Link href={`${base}/alerts`}>
-                  All alerts <ArrowRightIcon />
-                </Link>
-              </Button>
-            </CardAction>
-          </CardHeader>
-          <CardContent>
-            {alerts.length === 0 ? (
-              <p className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
-                <CheckCircle2Icon className="size-4 text-status-good" /> Nothing needs your attention.
-              </p>
-            ) : (
-              <ul className="grid gap-3">
-                {alerts.map((a) => {
-                  const s = SEVERITY[a.severity];
-                  return (
-                    <li key={a.id}>
-                      <Link href={`${base}/${a.link ?? "alerts"}`} className="flex gap-3 rounded-lg p-2 hover:bg-muted">
-                        <s.icon className={cn("mt-0.5 size-4 shrink-0", s.tone)} aria-label={s.label} />
+        <div className="grid content-start gap-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <BellIcon className="size-4 text-primary" /> Alerts
+              </CardTitle>
+              <CardDescription>What needs attention now.</CardDescription>
+              <CardAction>
+                <Button asChild variant="ghost" size="sm">
+                  <Link href={`${base}/alerts`}>
+                    All alerts <ArrowRightIcon />
+                  </Link>
+                </Button>
+              </CardAction>
+            </CardHeader>
+            <CardContent>
+              {alerts.length === 0 ? (
+                <p className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+                  <CheckCircle2Icon className="size-4 text-status-good" /> Nothing needs your attention.
+                </p>
+              ) : (
+                <ul className="grid gap-3">
+                  {alerts.map((a) => {
+                    const s = SEVERITY[a.severity];
+                    return (
+                      <li key={a.id}>
+                        <Link href={`${base}/${a.link ?? "alerts"}`} className="flex gap-3 rounded-lg p-2 hover:bg-muted">
+                          <s.icon className={cn("mt-0.5 size-4 shrink-0", s.tone)} aria-label={s.label} />
+                          <span className="grid gap-0.5">
+                            <span className="text-sm font-medium">{a.title}</span>
+                            {a.body && <span className="text-xs text-muted-foreground">{a.body}</span>}
+                          </span>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CalendarClockIcon className="size-4 text-primary" /> Upcoming deadlines
+              </CardTitle>
+              <CardAction>
+                <Button asChild variant="ghost" size="sm">
+                  <Link href={`${base}/calendar`}>
+                    Calendar <ArrowRightIcon />
+                  </Link>
+                </Button>
+              </CardAction>
+            </CardHeader>
+            <CardContent>
+              {deadlines.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No open deadlines. Statutory dates are added automatically.</p>
+              ) : (
+                <ul className="grid gap-3">
+                  {deadlines.map((d) => {
+                    const { state, daysLeft } = deadlineState(d, now);
+                    return (
+                      <li key={d.id} className="flex items-start justify-between gap-3 text-sm">
                         <span className="grid gap-0.5">
-                          <span className="text-sm font-medium">{a.title}</span>
-                          {a.body && <span className="text-xs text-muted-foreground">{a.body}</span>}
+                          <span className="font-medium">{d.title}</span>
+                          <span className="text-xs text-muted-foreground">{formatDueDate(d.dueDate)}</span>
                         </span>
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
+                        <Badge
+                          variant="outline"
+                          className={cn("shrink-0", state === "OVERDUE" && "border-status-critical/50 text-status-critical", state === "DUE_SOON" && "border-status-warning/60")}
+                        >
+                          {describeDaysLeft(daysLeft)}
+                        </Badge>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       <Card>

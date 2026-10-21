@@ -4,7 +4,7 @@ B2B SaaS for managing Extended Producer Responsibility (EPR) compliance in India
 
 > **Regulatory values in seed data are placeholders.** Verify them against the latest CPCB notification before relying on any calculation.
 
-**Status:** Phase 3 (targets, rules & dashboard) complete. See [docs/PHASE-0-PLAN.md](docs/PHASE-0-PLAN.md) for the full plan.
+**Status:** Phases 1–3 and 6 (reports, calendar & reminders) complete; Phases 4–5 (certificates, AI extraction) are next. See [docs/PHASE-0-PLAN.md](docs/PHASE-0-PLAN.md) for the full plan.
 
 ## Demo
 
@@ -93,6 +93,28 @@ Obligations are computed by a pure engine ([src/lib/domain/obligations/calculate
 No regulatory number is hard-coded. Rules are versioned: a platform admin's edit creates a new version, and obligation snapshots store the rule ids they used. **Seeded values are placeholders** (`isVerified = false`, "VERIFY WITH LATEST CPCB NOTIFICATION") and every screen that uses them shows a warning until an admin verifies them.
 
 Alerts ("You are 40% behind on Cat II target with 3 months left") are rebuilt after each dashboard view and daily by Vercel Cron (`/api/cron/compliance`, protected by `CRON_SECRET` — set it in Vercel's env vars).
+
+### Reports
+
+`/o/[org]/reports` builds files from live data — nothing is stored, so a report always reflects the current numbers:
+
+| Report | Formats | Contents |
+|---|---|---|
+| CPCB annual return | XLSX, PDF | Entity details, state-wise quantities introduced, obligation and fulfilment, certificates used, recycled content — laid out like the CPCB EPR portal return |
+| Obligation summary | PDF, XLSX | Score, target, fulfilment, remaining and EC exposure by category |
+| Material register | XLSX, CSV | Every entry for the FY with brand, plant, GSTIN and source |
+| Certificate register | XLSX, CSV | Every certificate; cost columns only for roles that can see costs |
+| Audit log export | CSV, XLSX | From the audit log page, with its filters (record type, person, date range) |
+
+Builders are pure functions ([src/lib/domain/reports/build.ts](src/lib/domain/reports/build.ts)) feeding three renderers in [src/lib/reports/](src/lib/reports/) (ExcelJS, pdf-lib, formula-safe CSV). Each download is recorded in report history and the audit log with a SHA-256 fingerprint, and is rate-limited per user.
+
+### Compliance calendar & reminders
+
+- **Statutory deadlines** (annual return, EPR fulfilment) are generated per waste stream from versioned `FILING_DEADLINE` rules — e.g. `{"deadlines":[{"key":"annual-return","title":"Annual return","month":6,"day":30,"yearOffset":1}]}` = "30 June after the FY ends". Seeded dates are placeholders like every other rule. Editing the rule moves open deadlines and their reminders.
+- **Internal deadlines** can be added, edited, completed and deleted by Admins, Compliance Managers and Consultants.
+- **Email reminders** go to every Admin and Compliance Manager on the chosen days (default 30, 7 and 1 days before) at 6 AM IST, sent by the same daily cron. Each reminder is claimed before sending, so overlapping runs never double-send; reminders for completed deadlines or former members are cancelled. **Set the SMTP variables in production** — without `SMTP_HOST`, reminders are logged and marked "not delivered".
+- **WhatsApp:** every deadline has a share button with ready-to-send text (`wa.me` link); automatic WhatsApp sending is a later integration.
+- Deadlines due within 7 days or overdue raise alerts and appear on the dashboard.
 
 ### Security measures
 

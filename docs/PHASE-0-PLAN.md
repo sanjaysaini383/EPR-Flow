@@ -16,7 +16,7 @@ Status: **approved** (defaults accepted; deployment changed to Vercel + Neon). T
 | Jobs | Vercel Cron → `/api/cron/*` route handlers | Serverless-friendly; idempotent handlers protected by `CRON_SECRET` |
 | Email | Nodemailer (any SMTP provider); logged to console in dev when SMTP is unset | WhatsApp: generate ready-to-send text + `wa.me` link (no API integration yet) |
 | Excel/CSV | ExcelJS (read + write), papaparse for CSV | |
-| PDF | `@react-pdf/renderer` for reports | |
+| PDF | `pdf-lib` for reports | Chosen over `@react-pdf/renderer` in Phase 6: small, no native or React-renderer dependency, works in Vercel functions |
 | Tests | Vitest (domain logic), Playwright (key flows) | |
 | Package manager | npm | |
 

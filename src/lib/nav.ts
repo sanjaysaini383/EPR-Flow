@@ -49,8 +49,8 @@ export const NAV: NavGroup[] = [
   {
     label: "Reporting",
     items: [
-      { label: "Reports", path: "reports", icon: "reports", phase: 6 },
-      { label: "Calendar", path: "calendar", icon: "calendar", phase: 6 },
+      { label: "Reports", path: "reports", icon: "reports" },
+      { label: "Calendar", path: "calendar", icon: "calendar" },
       { label: "Audit log", path: "audit-log", icon: "audit" },
     ],
   },

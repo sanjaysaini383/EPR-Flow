@@ -18,8 +18,9 @@ export default async function globalTeardown() {
     await client.query(`DELETE FROM "Brand" WHERE name LIKE 'E2E Brand %'`);
     await client.query(`DELETE FROM "Plant" WHERE name LIKE 'E2E Plant %'`);
     await client.query(`DELETE FROM "RegulationRule" WHERE notes = 'e2e-test'`);
+    await client.query(`DELETE FROM "Deadline" WHERE title LIKE 'E2E filing check %'`);
     await client.query(`DELETE FROM "AuditLog" WHERE "organizationId" IS NULL AND action = 'rule.new_version' AND "actorId" = (SELECT id FROM "User" WHERE email = 'ops@eprflow.in')`);
-    await client.query(`DELETE FROM "RateLimit" WHERE key LIKE 'login:%' OR key LIKE 'signup:%' OR key LIKE 'invite%' OR key LIKE 'import%'`);
+    await client.query(`DELETE FROM "RateLimit" WHERE key LIKE 'login:%' OR key LIKE 'signup:%' OR key LIKE 'invite%' OR key LIKE 'import%' OR key LIKE 'report:%'`);
   } finally {
     await client.end();
   }

@@ -3,6 +3,8 @@ import { randomBytes, createHash } from "node:crypto";
 import { hash } from "@node-rs/argon2";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, type Prisma, type Role, type WasteStream } from "../src/generated/prisma/client";
+import { buildStatutoryDeadlines } from "../src/lib/domain/deadlines/statutory";
+import { financialYearOf, formatFinancialYear, parseFinancialYear } from "../src/lib/domain/financial-year";
 import { gstinCheckDigit } from "../src/lib/domain/gstin";
 
 const prisma = new PrismaClient({
@@ -325,7 +327,6 @@ async function seedRegulationRules() {
   for (const [code, inrPerKg] of Object.entries({ PLASTIC_CAT_I: 5, PLASTIC_CAT_II: 10, PLASTIC_CAT_III: 10, PLASTIC_CAT_IV: 10 })) {
     rules.push({ ...base, stream: "PLASTIC", categoryId: cat[code], ruleType: "EC_RATE", value: inrPerKg, unit: "INR_PER_KG", effectiveFrom: fyStart(2022), sourceReference: "CPCB Environmental Compensation guidelines (placeholder)" });
   }
-  rules.push({ ...base, stream: "PLASTIC", ruleType: "FILING_DEADLINE", value: 0, unit: "DATE", effectiveFrom: fyStart(2022), parameters: { annualReturnDue: "06-30" }, sourceReference: "Annual return due date (placeholder)" });
 
   // E-waste and batteries — collection targets (placeholders).
   rules.push(
@@ -337,6 +338,86 @@ async function seedRegulationRules() {
 
   await prisma.regulationRule.createMany({ data: rules });
   console.log(`✓ ${rules.length} regulation rules (placeholders — ${PLACEHOLDER})`);
+}
+
+/**
+ * Filing deadlines per waste stream (placeholders). Dates are relative to the FY:
+ * yearOffset 1 + 30 June = "30 June after the financial year ends".
+ * Upgrades the older `{ annualReturnDue }` rule in place when re-seeding an existing database.
+ */
+const FILING_DEADLINES: Record<WasteStream, { key: string; title: string; description: string; month: number; day: number; yearOffset: number }[]> = {
+  PLASTIC: [
+    { key: "epr-fulfilment", title: "EPR target fulfilment", description: "The year's EPR obligation must be covered by EPR certificates by the end of the financial year.", month: 3, day: 31, yearOffset: 1 },
+    { key: "annual-return", title: "Annual return", description: "File the PIBO annual return on the CPCB centralised EPR portal for the year just ended.", month: 6, day: 30, yearOffset: 1 },
+  ],
+  EWASTE: [
+    { key: "epr-fulfilment", title: "EPR target fulfilment", description: "Cover the year's e-waste EPR target with certificates by the end of the financial year.", month: 3, day: 31, yearOffset: 1 },
+    { key: "annual-return", title: "Annual return", description: "File the producer annual return on the CPCB e-waste EPR portal.", month: 6, day: 30, yearOffset: 1 },
+  ],
+  BATTERY: [
+    { key: "annual-return", title: "Annual return", description: "File the producer annual return on the CPCB battery EPR portal.", month: 6, day: 30, yearOffset: 1 },
+  ],
+};
+
+async function seedFilingDeadlineRules() {
+  const fyStart = (y: number) => new Date(Date.UTC(y, 3, 1));
+  let changed = 0;
+  for (const stream of Object.keys(FILING_DEADLINES) as WasteStream[]) {
+    const parameters = { deadlines: FILING_DEADLINES[stream] };
+    const existing = await prisma.regulationRule.findFirst({ where: { stream, ruleType: "FILING_DEADLINE" }, orderBy: { version: "desc" } });
+    if (existing && (existing.parameters as { deadlines?: unknown } | null)?.deadlines) continue;
+    if (existing) {
+      await prisma.regulationRule.update({ where: { id: existing.id }, data: { parameters } });
+    } else {
+      await prisma.regulationRule.create({
+        data: { stream, ruleType: "FILING_DEADLINE", value: 0, unit: "DATE", effectiveFrom: fyStart(2022), parameters, isVerified: false, version: 1, notes: PLACEHOLDER, sourceReference: "CPCB EPR portal filing calendar (placeholder)" },
+      });
+    }
+    changed++;
+  }
+  if (changed) console.log(`✓ filing-deadline rules for ${changed} waste stream(s) (placeholders — ${PLACEHOLDER})`);
+}
+
+/** A few internal deadlines so the demo calendar is not only statutory dates. Dates are relative to today. */
+async function seedDeadlines(orgSlug: string, userId: string) {
+  const org = await prisma.organization.findUniqueOrThrow({ where: { slug: orgSlug } });
+  if (await prisma.deadline.count({ where: { organizationId: org.id, ruleId: null } })) return;
+  const today = new Date();
+  const day = (offset: number) => new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + offset));
+  await prisma.deadline.createMany({
+    data: [
+      { organizationId: org.id, title: "Board review of EPR certificate purchases", description: "Approve the Q3 certificate budget for Cat II and Cat III shortfalls.", dueDate: day(5), reminderDays: [7, 1], createdById: userId },
+      { organizationId: org.id, title: "Collect Q3 dispatch data from all plants", description: "Pune, Bengaluru and Noida plants to share monthly packaging dispatch.", dueDate: day(24), reminderDays: [14, 3], createdById: userId },
+      { organizationId: org.id, title: "Recycler due-diligence visit — PWP-MH-0412", dueDate: day(48), reminderDays: [30, 7], createdById: userId },
+      { organizationId: org.id, title: "Upload Q2 material data", dueDate: day(-12), status: "DONE", completedAt: day(-14), completedById: userId, createdById: userId },
+    ],
+  });
+  console.log("✓ demo calendar deadlines (statutory dates are generated by the app)");
+}
+
+/**
+ * The demo company has already filed last year's returns: record the previous FY's
+ * statutory deadlines that are past as done (same keys the app generates, so nothing duplicates).
+ */
+async function seedFiledReturns(orgSlug: string, userId: string) {
+  const org = await prisma.organization.findUniqueOrThrow({ where: { slug: orgSlug } });
+  const previousFy = formatFinancialYear(parseFinancialYear(financialYearOf(new Date())).startYear - 1);
+  const rules = await prisma.regulationRule.findMany({ where: { ruleType: "FILING_DEADLINE" } });
+  const deadlines = buildStatutoryDeadlines({
+    streams: org.wasteStreams,
+    financialYears: [previousFy],
+    rules: rules.map((r) => ({ ...r, value: Number(r.value), parameters: (r.parameters as Record<string, unknown> | null) ?? null })),
+  }).filter((d) => d.dueDate < new Date());
+  for (const d of deadlines) {
+    const completedAt = new Date(d.dueDate.getTime() - 4 * 86_400_000);
+    const done = { status: "DONE" as const, completedAt, completedById: userId };
+    await prisma.deadline.upsert({
+      where: { organizationId_dedupeKey: { organizationId: org.id, dedupeKey: d.dedupeKey } },
+      create: { organizationId: org.id, dedupeKey: d.dedupeKey, title: d.title, description: d.description, dueDate: d.dueDate, financialYear: d.financialYear, stream: d.stream as WasteStream, ruleId: d.ruleId, ...done },
+      update: done,
+    });
+  }
+  if (deadlines.length) console.log(`✓ ${deadlines.length} FY ${previousFy} filing(s) recorded as done`);
 }
 
 async function seedPlatformAdmin(password: string) {
@@ -464,6 +545,9 @@ async function main() {
   await seedMaterialEntries("demo-consumer-goods", ids.COMPLIANCE_MANAGER);
   await seedMaterialEntries("greenpack-industries", ids.CONSULTANT);
   await seedRegulationRules();
+  await seedFilingDeadlineRules();
+  await seedDeadlines("demo-consumer-goods", ids.COMPLIANCE_MANAGER);
+  await seedFiledReturns("demo-consumer-goods", ids.COMPLIANCE_MANAGER);
   await seedPlatformAdmin(password);
   const recyclers = await seedRecyclers();
   await seedCertificates("demo-consumer-goods", recyclers, ids.ADMIN);

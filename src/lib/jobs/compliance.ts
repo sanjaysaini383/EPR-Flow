@@ -1,10 +1,14 @@
 import "server-only";
+import { syncDeadlines } from "@/features/calendar/service";
 import { computeCompliance, syncCompliance } from "@/features/compliance/service";
 import { prisma } from "@/lib/db/client";
 import { getTenantDb } from "@/lib/db/tenant";
 import { financialYearOf } from "@/lib/domain/financial-year";
 
-/** Cron job: recompute the current FY for every organisation and refresh alerts. */
+/**
+ * Cron job: for every organisation, recompute the current FY and refresh alerts,
+ * then bring the deadline calendar and its reminders up to date.
+ */
 export async function recalculateAllOrganizations(today = new Date()) {
   const orgs = await prisma.organization.findMany({
     where: { deletedAt: null },
@@ -17,6 +21,7 @@ export async function recalculateAllOrganizations(today = new Date()) {
     try {
       const db = getTenantDb(org.id);
       await syncCompliance(db, org, await computeCompliance(db, org, fy, today), today);
+      await syncDeadlines(db, org, today);
       ok++;
     } catch (error) {
       console.error(`[cron:compliance] org ${org.id} failed`, error);
