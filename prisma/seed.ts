@@ -651,6 +651,13 @@ async function seedCertificateWorkflow(recyclers: Record<string, string>, ids: R
 
 async function main() {
   await seedCategories();
+  // Production: reference data only (categories and placeholder rules) — no demo companies or users.
+  if (process.argv.includes("--reference-only")) {
+    await seedRegulationRules();
+    await seedFilingDeadlineRules();
+    console.log("✓ reference data only (run without --reference-only for the demo companies)");
+    return;
+  }
   const { org, ids, password } = await seedDemoCompany();
   await seedSecondClient(ids.CONSULTANT, password);
   await seedDemoHistory(org.id, ids);

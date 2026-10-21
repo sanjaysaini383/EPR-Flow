@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 
-const PROTECTED_PREFIXES = ["/o", "/onboarding"];
+const PROTECTED_PREFIXES = ["/o", "/onboarding", "/consultant"];
 // Stored documents (PDF/images, type verified from their bytes) may be shown in a same-origin
 // <iframe> on the extraction review screen; they never run scripts.
 const FILE_PATH = /^\/o\/[^/]+\/files\/[^/]+$/;

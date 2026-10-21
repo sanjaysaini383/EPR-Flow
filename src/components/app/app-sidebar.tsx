@@ -11,6 +11,7 @@ import {
   FileSpreadsheetIcon,
   HistoryIcon,
   LayoutDashboardIcon,
+  LayoutGridIcon,
   LogOutIcon,
   PackageIcon,
   PlusIcon,
@@ -149,6 +150,13 @@ function OrgSwitcher({ org, orgs }: { org: Org; orgs: Org[] }) {
               </DropdownMenuItem>
             ))}
             <DropdownMenuSeparator />
+            {orgs.length > 1 && (
+              <DropdownMenuItem asChild>
+                <Link href="/consultant">
+                  <LayoutGridIcon /> All clients overview
+                </Link>
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem asChild>
               <Link href="/onboarding">
                 <PlusIcon /> Add organization

@@ -77,10 +77,10 @@ test.describe("roles and members", () => {
     await expect(page).toHaveURL(/\/login/);
   });
 
-  test("placeholder sections render and unknown sections 404", async ({ page }) => {
+  test("every sidebar section opens and unknown sections 404", async ({ page }) => {
     await login(page, "compliance@demo.eprflow.in");
     await page.getByRole("link", { name: "Certificates" }).click();
-    await expect(page.getByText("Coming in phase 4")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "EPR certificates" })).toBeVisible();
     // Streams behind the loading skeleton, so the status is 200 + noindex; the UI shows the 404.
     await page.goto(`/o/${DEMO_ORG}/not-a-section`);
     await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();

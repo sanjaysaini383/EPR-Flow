@@ -162,9 +162,9 @@ Builders are pure functions ([src/lib/domain/reports/build.ts](src/lib/domain/re
 
 ## Deploying (Vercel + Neon)
 
-1. Create a Neon project. Copy the **pooled** connection string (host contains `-pooler`) into `DATABASE_URL` and the **direct** one into `DIRECT_URL`.
-2. Import the repo in Vercel and set the env vars from `.env.example` (`AUTH_SECRET`, `APP_URL`, SMTP settings, optional Google keys).
-3. The `vercel-build` script runs `prisma migrate deploy` before `next build`, so migrations apply on each deploy.
-4. Seed reference data once: `DATABASE_URL=… DIRECT_URL=… npm run db:seed`. **Note:** the seed also creates the demo accounts with a public password — delete them (or use a separate staging database) before real customers sign up.
+See **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** for the full guide: Neon branches, Vercel Blob, environment variables, migrations on deploy, reference-data seed (`npm run db:seed:reference` — never the demo seed in production), creating the first platform admin (`node scripts/make-platform-admin.mjs <email>`), verifying regulation rules, cron, Google sign-in and a security checklist.
 
-Background jobs (reminders, alert recalculation) will run as Vercel Cron → `/api/cron/*` route handlers from phase 3 onwards.
+## Consultant view and pricing
+
+- `/consultant` lists every company a user belongs to — status, remaining obligation, EC risk, alerts, approvals waiting and the next deadline — worst first. It is linked from the organisation switcher for users in more than one company.
+- `/pricing` and the landing page show the Starter / Growth / Enterprise plans from [src/lib/pricing.ts](src/lib/pricing.ts). Prices are indicative and limits are informational; billing is not connected.
