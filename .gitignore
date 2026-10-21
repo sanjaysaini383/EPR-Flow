@@ -6,7 +6,7 @@ coverage/
 playwright-report/
 test-results/
 src/generated/
-storage/
+/storage/
 .env
 .env*.local
 *.log

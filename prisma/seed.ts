@@ -5,6 +5,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient, type Prisma, type Role, type WasteStream } from "../src/generated/prisma/client";
 import { buildStatutoryDeadlines } from "../src/lib/domain/deadlines/statutory";
 import { financialYearOf, formatFinancialYear, parseFinancialYear } from "../src/lib/domain/financial-year";
+import { checkDuplicates, checkRecycler, normalizeCertificateNumber } from "../src/lib/domain/fraud/checks";
 import { gstinCheckDigit } from "../src/lib/domain/gstin";
 
 const prisma = new PrismaClient({
@@ -516,7 +517,7 @@ async function seedCertificates(orgSlug: string, recyclers: Record<string, strin
         categoryId: cat[code],
         type,
         certificateNumber: number,
-        certificateNumberNormalized: number.replace(/[^A-Za-z0-9]/g, "").toUpperCase(),
+        certificateNumberNormalized: normalizeCertificateNumber(number),
         financialYear: fy,
         quantityKg: qty,
         issueDate: date,
@@ -537,6 +538,117 @@ async function seedCertificates(orgSlug: string, recyclers: Record<string, strin
   console.log(`✓ ${n} approved certificates and FY budgets for ${org.name}`);
 }
 
+/** Keeps stored normalised numbers in line with the app's rule (older seeds stripped "/" too). */
+async function seedNormalizeNumbers() {
+  const rows = await prisma.certificate.findMany({ select: { id: true, certificateNumber: true, certificateNumberNormalized: true } });
+  let fixed = 0;
+  for (const r of rows) {
+    const n = normalizeCertificateNumber(r.certificateNumber);
+    if (n !== r.certificateNumberNormalized) {
+      await prisma.certificate.update({ where: { id: r.id }, data: { certificateNumberNormalized: n } });
+      fixed++;
+    }
+  }
+  if (fixed) console.log(`✓ re-normalised ${fixed} certificate number(s)`);
+}
+
+/**
+ * Certificates in every workflow state, so the approval queue and fraud checks can be demoed:
+ *  - awaiting approval, clean (an Admin can approve it),
+ *  - awaiting approval, blocked: the same number was already claimed by another company on EPRFlow,
+ *  - a draft from an unverified recycler the team added themselves,
+ *  - a rejected certificate with the reason.
+ * Flags use the same messages as the app's checks.
+ */
+async function seedCertificateWorkflow(recyclers: Record<string, string>, ids: Record<string, string>) {
+  const demo = await prisma.organization.findUniqueOrThrow({ where: { slug: "demo-consumer-goods" } });
+  const greenpack = await prisma.organization.findUniqueOrThrow({ where: { slug: "greenpack-industries" } });
+  const marker = "EPR/KA-0177/2026/000412";
+  if (await prisma.certificate.findFirst({ where: { organizationId: demo.id, certificateNumber: marker } })) return;
+  const cat = Object.fromEntries((await prisma.materialCategory.findMany()).map((c) => [c.code, c.id]));
+  const day = (iso: string) => new Date(`${iso}T00:00:00Z`);
+  const fy = financialYearOf(new Date());
+
+  const sai = await prisma.recycler.create({
+    data: { organizationId: demo.id, name: "Sai Ganesh Plastics", stateCode: "MH", city: "Nashik", contactPhone: "+919800012345", verificationStatus: "UNVERIFIED" },
+  });
+
+  type Seed = {
+    org: string;
+    number: string;
+    recycler: string;
+    code: string;
+    type: "RECYCLING" | "END_OF_LIFE";
+    tonnes: number;
+    inrPerKg: number;
+    issued: string;
+    status: "DRAFT" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED";
+    by: string;
+    extra?: Record<string, unknown>;
+  };
+  const rejection = "Quantity on the certificate (30 t) does not match the transfer on the CPCB portal (3 t). Ask the recycler for a corrected certificate.";
+  const plan: Seed[] = [
+    // Another company already holds this number, so the demo company's copy is the suspicious one.
+    { org: greenpack.id, number: "EPR/MH-0412/2026/000777", recycler: recyclers["PWP-MH-0412"], code: "PLASTIC_CAT_I", type: "RECYCLING", tonnes: 25, inrPerKg: 10.1, issued: "2026-09-28", status: "APPROVED", by: ids.CONSULTANT, extra: { approvedById: ids.CONSULTANT, approvedAt: day("2026-10-01") } },
+    { org: demo.id, number: marker, recycler: recyclers["PWP-KA-0177"], code: "PLASTIC_CAT_II", type: "RECYCLING", tonnes: 40, inrPerKg: 12.4, issued: "2026-10-05", status: "PENDING_APPROVAL", by: ids.COMPLIANCE_MANAGER, extra: { submittedById: ids.COMPLIANCE_MANAGER, submittedAt: day("2026-10-08") } },
+    { org: demo.id, number: "EPR/MH-0412/2026/000777", recycler: recyclers["PWP-MH-0412"], code: "PLASTIC_CAT_I", type: "RECYCLING", tonnes: 25, inrPerKg: 10.2, issued: "2026-09-28", status: "PENDING_APPROVAL", by: ids.COMPLIANCE_MANAGER, extra: { submittedById: ids.COMPLIANCE_MANAGER, submittedAt: day("2026-10-09") } },
+    { org: demo.id, number: "SGP/2026/1189", recycler: sai.id, code: "PLASTIC_CAT_III", type: "RECYCLING", tonnes: 15, inrPerKg: 31, issued: "2026-10-12", status: "DRAFT", by: ids.COMPLIANCE_MANAGER },
+    { org: demo.id, number: "EPR/WB-0031/2026/000903", recycler: recyclers["PWP-WB-0031"], code: "PLASTIC_CAT_II", type: "END_OF_LIFE", tonnes: 30, inrPerKg: 4.6, issued: "2026-09-15", status: "REJECTED", by: ids.COMPLIANCE_MANAGER, extra: { submittedById: ids.COMPLIANCE_MANAGER, submittedAt: day("2026-09-18"), rejectedById: ids.ADMIN, rejectedAt: day("2026-09-20"), rejectionReason: rejection } },
+  ];
+
+  const created: Record<string, string> = {};
+  for (const c of plan) {
+    const kg = c.tonnes * 1000;
+    const row = await prisma.certificate.create({
+      data: {
+        organizationId: c.org,
+        recyclerId: c.recycler,
+        categoryId: cat[c.code],
+        type: c.type,
+        certificateNumber: c.number,
+        certificateNumberNormalized: normalizeCertificateNumber(c.number),
+        financialYear: fy,
+        quantityKg: kg,
+        issueDate: day(c.issued),
+        transferDate: day(c.issued),
+        costInr: Math.round(kg * c.inrPerKg),
+        pricePerKgInr: c.inrPerKg,
+        status: c.status,
+        createdById: c.by,
+        ...c.extra,
+      },
+    });
+    created[`${c.org}:${c.number}`] = row.id;
+  }
+
+  const unknownRecycler = { verificationStatus: "VERIFIED" as const, registrationValidFrom: null, registrationValidTo: null, registeredCategoryIds: null, capacityKg: null };
+  const duplicate = checkDuplicates({ today: new Date(), sameOrgDuplicates: 0, otherOrgDuplicates: 1, duplicateFileCount: 0, recycler: unknownRecycler, issuedByRecyclerKg: 0, marketMedianPricePerKg: null, marketSampleSize: 0 })[0];
+  const unverified = checkRecycler(
+    { financialYear: fy, categoryId: cat.PLASTIC_CAT_III, quantityKg: 15000, issueDate: day("2026-10-12"), transferDate: null, pricePerKgInr: 31 },
+    { ...unknownRecycler, verificationStatus: "UNVERIFIED" },
+  )[0];
+  for (const [certificateId, flag] of [
+    [created[`${demo.id}:EPR/MH-0412/2026/000777`], duplicate],
+    [created[`${demo.id}:SGP/2026/1189`], unverified],
+  ] as const) {
+    await prisma.certificateFlag.create({ data: { organizationId: demo.id, certificateId, type: flag.type, severity: flag.severity, message: flag.message } });
+  }
+  await prisma.alert.upsert({
+    where: { organizationId_dedupeKey: { organizationId: demo.id, dedupeKey: "certificates:pending-approval" } },
+    create: { organizationId: demo.id, dedupeKey: "certificates:pending-approval", severity: "INFO", title: "2 certificates awaiting approval", body: "An Admin needs to review the checks and approve or reject them.", link: "certificates?status=PENDING_APPROVAL" },
+    update: { title: "2 certificates awaiting approval", resolvedAt: null },
+  });
+  await prisma.recyclerRating.createMany({
+    data: [
+      { organizationId: demo.id, recyclerId: recyclers["PWP-KA-0177"], userId: ids.COMPLIANCE_MANAGER, rating: 5, comment: "Certificates arrive within a week; documents always match the portal." },
+      { organizationId: demo.id, recyclerId: recyclers["PWP-MH-0412"], userId: ids.ADMIN, rating: 4, comment: "Good capacity for Cat I. Pricing slightly above market." },
+      { organizationId: greenpack.id, recyclerId: recyclers["PWP-KA-0177"], userId: ids.CONSULTANT, rating: 4, comment: null },
+    ],
+    skipDuplicates: true,
+  });
+  console.log("✓ certificate workflow demo (2 awaiting approval, 1 blocked by a duplicate, 1 draft, 1 rejected)");
+}
+
 async function main() {
   await seedCategories();
   const { org, ids, password } = await seedDemoCompany();
@@ -551,6 +663,8 @@ async function main() {
   await seedPlatformAdmin(password);
   const recyclers = await seedRecyclers();
   await seedCertificates("demo-consumer-goods", recyclers, ids.ADMIN);
+  await seedNormalizeNumbers();
+  await seedCertificateWorkflow(recyclers, ids);
 }
 
 main()

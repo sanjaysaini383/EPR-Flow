@@ -12,7 +12,7 @@ export const STREAM_LABELS: Record<string, string> = {
  * One due date defined by a FILING_DEADLINE rule. The date is relative to the
  * financial year: `yearOffset` 1 with month 6 / day 30 means "30 June after the FY ends".
  */
-const deadlineSpec = z.object({
+export const deadlineSpecSchema = z.object({
   key: z.string().regex(/^[a-z0-9-]{2,40}$/),
   title: z.string().min(2).max(120),
   description: z.string().max(500).optional(),
@@ -20,7 +20,7 @@ const deadlineSpec = z.object({
   day: z.number().int().min(1).max(31),
   yearOffset: z.number().int().min(0).max(2),
 });
-export type DeadlineSpec = z.infer<typeof deadlineSpec>;
+export type DeadlineSpec = z.infer<typeof deadlineSpecSchema>;
 
 const legacyDue = /^(\d{2})-(\d{2})$/;
 
@@ -33,7 +33,7 @@ export function parseDeadlineSpecs(parameters: Record<string, unknown> | null): 
   if (!parameters) return [];
   if (Array.isArray(parameters.deadlines)) {
     return parameters.deadlines.flatMap((d) => {
-      const parsed = deadlineSpec.safeParse(d);
+      const parsed = deadlineSpecSchema.safeParse(d);
       return parsed.success ? [parsed.data] : [];
     });
   }

@@ -41,8 +41,8 @@ export const NAV: NavGroup[] = [
     label: "Compliance",
     items: [
       { label: "Targets", path: "targets", icon: "targets" },
-      { label: "Certificates", path: "certificates", icon: "certificates", phase: 4 },
-      { label: "Recyclers", path: "recyclers", icon: "recyclers", phase: 4 },
+      { label: "Certificates", path: "certificates", icon: "certificates" },
+      { label: "Recyclers", path: "recyclers", icon: "recyclers" },
       { label: "AI extraction", path: "extractions", icon: "extraction", phase: 5 },
     ],
   },

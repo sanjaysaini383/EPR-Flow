@@ -6,6 +6,7 @@ import { fieldErrors, handleActionError, type ActionState } from "@/lib/actions"
 import { audit } from "@/lib/audit";
 import { requirePlatformAdmin } from "@/lib/auth/session";
 import { prisma } from "@/lib/db/client";
+import { deadlineSpecSchema } from "@/lib/domain/deadlines/statutory";
 import { parseNumber } from "@/lib/domain/units";
 import { optionalText } from "@/lib/validation/common";
 
@@ -18,6 +19,7 @@ const parametersSchema = z
       .string()
       .regex(/^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/, "annualReturnDue must be MM-DD")
       .optional(),
+    deadlines: z.array(deadlineSpecSchema.strict()).max(10).optional(),
   })
   .strict();
 

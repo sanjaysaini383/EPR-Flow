@@ -13,7 +13,9 @@ export function useFormAction<S>(action: (prev: Awaited<S>, formData: FormData) 
 
   function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
+    // Include the clicked submit button's name/value (e.g. intent=submit vs intent=draft).
+    const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
+    const formData = new FormData(event.currentTarget, submitter);
     startTransition(() => dispatch(formData));
   }
 

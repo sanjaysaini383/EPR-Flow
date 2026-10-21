@@ -14,6 +14,8 @@ const eslintConfig = defineConfig([
       "src/lib/auth/**",
       "src/lib/security/**",
       "src/lib/jobs/**",
+      "src/lib/storage/**",
+      "src/lib/fraud/**",
       "src/auth.ts",
       "src/app/onboarding/**",
       "src/app/(auth)/**",

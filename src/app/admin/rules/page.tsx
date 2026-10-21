@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { prisma } from "@/lib/db/client";
 import { cn } from "@/lib/utils";
+import { AdminNav } from "../admin-nav";
 import { RuleEditDialog } from "./rule-edit-dialog";
 
 export const metadata: Metadata = { title: "Regulation rules" };
@@ -44,6 +45,7 @@ export default async function RulesPage({ searchParams }: PageProps<"/admin/rule
 
   return (
     <div className="grid gap-6">
+      <AdminNav />
       <PageHeader
         title="Regulation rules"
         description="Targets, recycled-content obligations and EC rates used by every organisation's calculations."

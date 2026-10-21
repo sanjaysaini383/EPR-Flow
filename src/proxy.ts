@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { auth } from "@/auth";
 
 const PROTECTED_PREFIXES = ["/o", "/onboarding"];
+// Stored documents (PDF/images, type verified from their bytes) may be shown in a same-origin
+// <iframe> on the extraction review screen; they never run scripts.
+const FILE_PATH = /^\/o\/[^/]+\/files\/[^/]+$/;
+const FILE_CSP = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; object-src 'self'; script-src 'none'; frame-ancestors 'self'";
 
 function buildCsp(nonce: string) {
   const isDev = process.env.NODE_ENV === "development";
@@ -35,6 +39,12 @@ export const proxy = auth((request) => {
     const login = new URL("/login", request.nextUrl);
     login.searchParams.set("callbackUrl", `${pathname}${search}`);
     return NextResponse.redirect(login);
+  }
+
+  if (FILE_PATH.test(pathname)) {
+    const response = NextResponse.next();
+    response.headers.set("Content-Security-Policy", FILE_CSP);
+    return response;
   }
 
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");

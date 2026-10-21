@@ -588,8 +588,13 @@ model Certificate {
   fileId                     String?
   extractionId               String?
   createdById                String
+  submittedById              String?
+  submittedAt                DateTime?
   approvedById               String?
   approvedAt                 DateTime?
+  rejectedById               String?
+  rejectedAt                 DateTime?
+  rejectionReason            String?
   notes                      String?
   createdAt                  DateTime          @default(now())
   updatedAt                  DateTime          @updatedAt
@@ -643,13 +648,22 @@ model StoredFile {
   uploadedById   String
   createdAt      DateTime @default(now())
 
-  organization  Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization  Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  content       StoredFileContent?
   importBatches ImportBatch[]
   certificates  Certificate[]
   extractions   Extraction[]
   reports       Report[]
 
   @@index([organizationId, sha256])
+}
+
+/// File bytes for the "database" storage driver (local development, or deployments without Vercel Blob).
+model StoredFileContent {
+  fileId String @id
+  bytes  Bytes
+
+  file StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
 }
 
 model Extraction {

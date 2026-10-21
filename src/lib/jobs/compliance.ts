@@ -4,10 +4,12 @@ import { computeCompliance, syncCompliance } from "@/features/compliance/service
 import { prisma } from "@/lib/db/client";
 import { getTenantDb } from "@/lib/db/tenant";
 import { financialYearOf } from "@/lib/domain/financial-year";
+import { refreshOpenCertificates } from "@/lib/fraud/service";
 
 /**
  * Cron job: for every organisation, recompute the current FY and refresh alerts,
- * then bring the deadline calendar and its reminders up to date.
+ * bring the deadline calendar and its reminders up to date, and re-run fraud checks
+ * on certificates that are still open.
  */
 export async function recalculateAllOrganizations(today = new Date()) {
   const orgs = await prisma.organization.findMany({
@@ -28,5 +30,7 @@ export async function recalculateAllOrganizations(today = new Date()) {
       failed.push(org.id);
     }
   }
-  return { financialYear: fy, organizations: orgs.length, ok, failed };
+  // Capacity and cross-tenant duplicates change as other organisations add certificates.
+  const recheckedCertificates = await refreshOpenCertificates(getTenantDb, today);
+  return { financialYear: fy, organizations: orgs.length, ok, failed, recheckedCertificates };
 }

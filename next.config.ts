@@ -20,7 +20,11 @@ const nextConfig: NextConfig = {
     serverActions: { bodySizeLimit: "6mb" },
   },
   async headers() {
-    return [{ source: "/:path*", headers: securityHeaders }];
+    return [
+      { source: "/:path*", headers: securityHeaders },
+      // Documents can be previewed in a same-origin frame (extraction review); later rules win.
+      { source: "/o/:org/files/:id", headers: [{ key: "X-Frame-Options", value: "SAMEORIGIN" }] },
+    ];
   },
   turbopack: {
     rules: {
