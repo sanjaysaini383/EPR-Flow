@@ -8,10 +8,10 @@ B2B SaaS for managing Extended Producer Responsibility (EPR) compliance in India
 
 ## Demo
 
-- **Video:** [docs/eprflow-demo.mp4](docs/eprflow-demo.mp4) — a 2-minute captioned product pitch (problem, live features, roadmap).
-- **Slides:** [docs/EPRFlow-Product-Overview.pptx](docs/EPRFlow-Product-Overview.pptx) — product overview deck (15 slides, with speaker notes).
+- **Video:** [docs/eprflow-demo.mp4](docs/eprflow-demo.mp4) — a 2-minute captioned product pitch: the problem, then each feature that solves it (targets, AI extraction, fraud checks, reports, calendar, consultant view).
+- **Slides:** [docs/EPRFlow-Product-Overview.pptx](docs/EPRFlow-Product-Overview.pptx) — 13-slide pitch deck with speaker notes: the problem, how each part of EPRFlow solves it, pricing and status.
 - **Demo data:** `npm run db:seed` creates *Demo Consumer Goods* (4 users, 3 GSTINs, 3 brands, 3 plants, 18 months of material data, audit history, a pending invite) and *GreenPack Industries* (a second client for the consultant account).
-- **Re-record the video:** start the app (`npm run build && npx next start`), then `node scripts/record-demo.mjs`. Loading pauses are logged to `demo/cuts.txt`; produce the final cut with `ffmpeg -i demo/eprflow-demo.webm -vf "$(cat demo/cuts.txt)" -r 25 -c:v libx264 -pix_fmt yuv420p docs/eprflow-demo.mp4`. Output goes to `demo/` (git-ignored).
+- **Re-record the video:** start the dev server with the stand-in AI reader (`AI_PROVIDER=fake npm run dev`; the database seeded with `npm run db:seed`), then `node scripts/record-demo.mjs`. Loading pauses are logged to `demo/cuts.txt`; produce the final cut with `ffmpeg -i demo/eprflow-demo.webm -vf "$(cat demo/cuts.txt)" -r 25 -c:v libx264 -pix_fmt yuv420p docs/eprflow-demo.mp4`. Output goes to `demo/` (git-ignored).
 
 ## Stack
 

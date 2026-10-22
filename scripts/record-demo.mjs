@@ -5,8 +5,9 @@
  *   1. npm run build && npm start   (database seeded with `npm run db:seed`)
  *   2. node scripts/record-demo.mjs
  *
+ * Run the dev server with AI_PROVIDER=fake so the AI step works without an API key.
  * Output: demo/eprflow-demo.webm (trimmed .mp4 is produced with ffmpeg, see README).
- * The import step uploads a sample file and discards it, so no data is changed.
+ * The sample upload and report download are removed afterwards, so no demo data changes.
  */
 import "dotenv/config";
 import { mkdir, rename, rm, writeFile } from "node:fs/promises";
@@ -22,6 +23,7 @@ const PASSWORD = "Demo@12345";
 
 // ── Overlay: caption bar, visible cursor and full-screen title cards ──────────────
 const OVERLAY = () => {
+  if (window !== window.top) return; // not inside the document preview frame
   const install = () => {
     if (document.getElementById("__demo_caption")) return;
     const style = document.createElement("style");
@@ -32,6 +34,7 @@ const OVERLAY = () => {
         transition:opacity .25s;pointer-events:none}
       #__demo_caption b{display:block;font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:#7ee2a0;margin-bottom:2px}
       #__demo_caption:empty{opacity:0}
+      nextjs-portal{display:none!important}
       #__demo_cursor{position:fixed;z-index:2147483647;width:22px;height:22px;margin:-11px 0 0 -11px;border-radius:50%;
         background:rgba(34,197,94,.35);border:2px solid #16a34a;pointer-events:none;transition:transform .12s}
       #__demo_cursor.down{transform:scale(.7);background:rgba(34,197,94,.7)}
@@ -195,30 +198,61 @@ async function setTheme(page, name) {
 
 async function warmUp(cookies) {
   const header = { cookie: cookies.map((c) => `${c.name}=${c.value}`).join("; ") };
-  for (const r of ["/dashboard", "/targets", "/alerts", "/materials", "/materials/import", "/gst", "/settings/budgets", "/audit-log"]) {
+  for (const r of ["/dashboard", "/targets", "/alerts", "/extractions", "/certificates", "/reports", "/calendar", "/audit-log"]) {
     await fetch(ORG + r, { headers: header }).catch(() => {});
   }
 }
 
-async function cleanup() {
+const SAMPLE_FILE = "greenloop-certificate-000519.png";
+
+/** Removes everything the recording created: the sample upload, downloaded-report records and their audit entries. */
+async function cleanup(since) {
   const client = new pg.Client({ connectionString: process.env.DIRECT_URL ?? process.env.DATABASE_URL });
   await client.connect();
-  await client.query(`DELETE FROM "ImportBatch" WHERE "fileName" = 'march-dispatch-tamilnadu.csv'`);
-  await client.query(`DELETE FROM "RateLimit" WHERE key LIKE 'login:%' OR key LIKE 'import%'`);
+  const files = `SELECT id FROM "StoredFile" WHERE "fileName" = '${SAMPLE_FILE}'`;
+  await client.query(`DELETE FROM "Extraction" WHERE "fileId" IN (${files})`);
+  await client.query(`DELETE FROM "StoredFileContent" WHERE "fileId" IN (${files})`);
+  await client.query(`DELETE FROM "StoredFile" WHERE "fileName" = '${SAMPLE_FILE}'`);
+  if (since) {
+    const org = `SELECT id FROM "Organization" WHERE slug = 'demo-consumer-goods'`;
+    await client.query(`DELETE FROM "Report" WHERE "createdAt" >= $1 AND "organizationId" IN (${org})`, [since]);
+    await client.query(`DELETE FROM "AuditLog" WHERE "createdAt" >= $1 AND "organizationId" IN (${org})`, [since]);
+  }
+  await client.query(`DELETE FROM "RateLimit" WHERE key LIKE 'login:%' OR key LIKE 'extract%' OR key LIKE 'report%'`);
   await client.end();
 }
 
-const SAMPLE_CSV = [
-  "month,category,entity_type,state,quantity,unit,brand,plant,gstin,recycled_content,pre_consumer,notes",
-  "2026-03,Cat I,Brand Owner,Tamil Nadu,12.5,t,FreshBite Snacks,,,,no,Distributor dispatch",
-  "2026-03,Cat II,Brand Owner,Tamil Nadu,8400,kg,FreshBite Snacks,,,,no,",
-  "2026-03,Cat III,Brand Owner,Tamil Nadu,3.2,tonnes,PureGlow Personal Care,,,,no,",
-  "2026-03,Cat II,Brand Owner,TN,2.1,t,HomeShine,,,,no,",
-  "2026-03,Cat IX,Brand Owner,Tamil Nadu,1.4,t,HomeShine,,,,no,Typo in category",
-  "2027-01,Cat I,Brand Owner,Tamil Nadu,5,t,FreshBite Snacks,,,,no,Future month",
-  "2026-03,Cat II,Brand Owner,Tamil Nadu,-40,kg,PureGlow Personal Care,,,,no,Negative quantity",
-  "2026-03,Cat I,Brand Owner,Tamil Nadu,900,boxes,FreshBite Snacks,,,,no,Unknown unit",
-].join("\n");
+/** A sample certificate image matching what the fake AI provider returns (an image, because headless Chromium cannot preview PDFs). */
+async function sampleCertificate(browser, file) {
+  const rows = [
+    ["Certificate number", "EPR/KA-0177/2026/000519"],
+    ["Processor registration", "PWP-KA-0177"],
+    ["Category of plastic packaging", "Category II"],
+    ["Type", "Recycling"],
+    ["Quantity", '<s>18,000 kg</s> <span class="hand">18,500</span>'],
+    ["Date of issue", "02-10-2026"],
+    ["Date of transfer", "&nbsp;"],
+    ["Financial year", "2026-27"],
+    ["Transferred to", "Demo Consumer Goods Pvt Ltd"],
+  ];
+  const html = `<html><body style="margin:0;font-family:Georgia,serif;background:#fff">
+    <div style="margin:28px;border:3px double #0f5a33;padding:44px 52px;height:1060px;box-sizing:border-box;position:relative">
+      <div style="font:700 34px Georgia;color:#0f5a33">GreenLoop Plastics LLP</div>
+      <div style="color:#555;font-size:17px;margin-top:6px">Registered Plastic Waste Processor · Bengaluru, Karnataka</div>
+      <div style="font:700 26px Georgia;margin:56px 0 28px;letter-spacing:.04em">EPR CERTIFICATE — RECYCLING</div>
+      <table style="width:100%;border-collapse:collapse;font-size:19px">${rows
+        .map(([k, v]) => `<tr><td style="color:#555;padding:13px 0;border-bottom:1px solid #dde5df;width:46%">${k}</td><td style="font-weight:700;border-bottom:1px solid #dde5df">${v}</td></tr>`)
+        .join("")}</table>
+      <div style="position:absolute;bottom:150px;left:52px;border-top:1px solid #555;width:240px;padding-top:8px;color:#555">Authorised signatory</div>
+      <div style="position:absolute;bottom:40px;left:52px;color:#b33;font:700 13px Arial">SAMPLE DOCUMENT — FOR PRODUCT DEMONSTRATION ONLY</div>
+    </div>
+    <style>.hand{font:700 22px "Segoe Print","Comic Sans MS",cursive;color:#1d3fa8;display:inline-block;transform:rotate(-4deg)}</style>
+  </body></html>`;
+  const page = await browser.newPage({ viewport: { width: 850, height: 1116 } });
+  await page.setContent(html);
+  await page.screenshot({ path: file });
+  await page.close();
+}
 
 async function main() {
   // Never hang: give up if a run takes far longer than a normal recording.
@@ -228,18 +262,18 @@ async function main() {
   }, 8 * 60_000).unref();
   await rm(OUT, { recursive: true, force: true });
   await mkdir(OUT, { recursive: true });
-  const csvPath = path.join(OUT, "march-dispatch-tamilnadu.csv");
-  await writeFile(csvPath, SAMPLE_CSV);
+  const samplePath = path.join(OUT, SAMPLE_FILE);
   await cleanup();
 
   const browser = await chromium.launch();
+  await sampleCertificate(browser, samplePath);
   console.log("Creating sessions…");
   const admin = await sessionCookies(browser, "admin@demo.eprflow.in");
   const consultant = await sessionCookies(browser, "consultant@demo.eprflow.in");
-  const ops = await sessionCookies(browser, "ops@eprflow.in");
   await warmUp(admin);
+  const since = new Date();
 
-  const context = await browser.newContext({ viewport: SIZE, colorScheme: "light", recordVideo: { dir: OUT, size: SIZE } });
+  const context = await browser.newContext({ viewport: SIZE, colorScheme: "light", recordVideo: { dir: OUT, size: SIZE }, acceptDownloads: true });
   await context.addInitScript(OVERLAY);
   await switchSession(context, admin);
   const page = await context.newPage();
@@ -248,132 +282,130 @@ async function main() {
 
   try {
     console.log("1. The problem", now().toFixed(1));
-    // ── 1. The problem (≈12s) ─────────────────────────────────────────────
+    // ── 1. The problem (≈14s) ─────────────────────────────────────────────
     await go(page, `${ORG}/dashboard`, "Compliance score");
     await showCard(page, `<small>EPR compliance for India</small><h1>EPRFlow</h1><p>Know your obligation. Trust every certificate. Never miss a deadline.</p>`);
     cuts.unshift([0, now()]);
     await wait(3600);
     await showCard(
       page,
-      `<small>The problem</small><h1>Thousands of Indian brands must<br/>meet EPR targets every year</h1>
-       <p>Plastic, E-Waste and Battery rules (2022) are tracked in Excel and email today —
-       wrong maths, missed CPCB deadlines, fake recycling certificates and crores in Environmental Compensation.</p>`,
+      `<small>The problem</small><h1>Every brand selling in India must<br/>meet EPR targets every year</h1>
+       <ul><li>Targets worked out by hand in Excel</li>
+       <li>Invoices and certificates typed in one by one</li>
+       <li>Fake and double-sold recycling certificates</li>
+       <li>CPCB deadlines missed — then Environmental Compensation</li></ul>`,
     );
-    await wait(6500);
+    await wait(7500);
+    await showCard(page, `<small>The solution</small><h1>One workspace for the whole EPR cycle</h1><p>Sales data → targets → certificates → CPCB return — checked, automated and audit-ready.</p>`);
+    await wait(3800);
     await hideCard(page);
 
     console.log("2. Dashboard", now().toFixed(1));
-    // ── 2. Dashboard (≈16s) ───────────────────────────────────────────────
-    await caption(page, "One dashboard", "Compliance score, remaining obligation, Environmental Compensation risk and certificate spend vs budget — live.", 4300);
+    // ── 2. Dashboard (≈12s) ───────────────────────────────────────────────
+    await caption(page, "Know where you stand", "Compliance score, remaining obligation, Environmental Compensation risk and certificate spend — live.", 4300);
     const bars = page.locator(".recharts-bar-rectangle");
     await smoothScroll(page, 420);
-    await caption(page, "Where you stand", "Progress per plastic category against where you should be today — plus automatic alerts.", 600);
+    await caption(page, "Progress per category", "Each plastic category against where it should be today, with upcoming deadlines alongside.", 600);
     if ((await bars.count()) > 4) {
-      for (const i of [4, 10, 16, 22]) {
-        const bar = bars.nth(Math.min(i, (await bars.count()) - 1));
-        await moveTo(page, bar);
+      for (const i of [4, 10, 16]) {
+        await moveTo(page, bars.nth(Math.min(i, (await bars.count()) - 1)));
         await wait(700);
       }
     }
-    await wait(1800);
+    await wait(1500);
     await smoothScroll(page, -420);
 
     console.log("3. Targets", now().toFixed(1));
-    // ── 3. Targets (≈14s) ─────────────────────────────────────────────────
+    // ── 3. Targets (≈8s) ──────────────────────────────────────────────────
     await nav(page, "Targets", "Obligation details");
-    await caption(page, "Automatic EPR targets", "The engine computes each category's target from 2 years of sales data and the applicable CPCB rule.", 4000);
+    await caption(page, "No more Excel maths", "Targets computed from your sales data and the applicable CPCB rule — shortfall and EC risk shown.", 3600);
     await smoothScroll(page, 520);
-    await caption(page, "Transparent maths", "Base quantity, target %, minimum recycling, shortfall and EC risk — with the exact rule version applied.", 4300);
-    await smoothScroll(page, 700);
+    await wait(2200);
+
+    console.log("4. AI extraction", now().toFixed(1));
+    // ── 4. AI extraction (≈20s) ───────────────────────────────────────────
+    await nav(page, "AI extraction", "Read with AI");
+    await caption(page, "No more typing", "Upload a certificate or a photo of an invoice — AI reads it for you.", 1500);
+    await click(page, page.getByText("EPR certificate", { exact: true }), 300);
+    await moveTo(page, page.locator("label[for=extract-file]").first()).catch(() => {});
+    await page.locator("#extract-file").setInputFiles(samplePath);
+    await wait(900);
+    const read = page.getByRole("button", { name: "Read with AI" });
+    await moveTo(page, read);
+    await read.click();
+    await cutWhile(async () => {
+      await page.waitForURL(/\/extractions\/[a-z0-9]{10,}$/, { timeout: 90_000 });
+      await ready(page, "Check before saving");
+    });
+    await caption(page, "Side-by-side review", "The document on the left, the values read from it on the right — nothing is saved until a person checks it.", 4500);
+    await moveTo(page, page.getByText(/Low confidence/).first());
+    await caption(page, "It tells you what to double-check", "Low-confidence fields and hand-written corrections are highlighted first.", 4200);
+    await moveTo(page, page.getByRole("button", { name: "Save draft" }));
+    await wait(1200);
+
+    console.log("5. Fraud checks", now().toFixed(1));
+    // ── 5. Fraud checks (≈14s) ────────────────────────────────────────────
+    await nav(page, "Certificates", "EPR certificates");
+    await caption(page, "Every certificate checked", "Duplicates, unverified recyclers, capacity breaches, impossible dates and outlier prices.", 3400);
+    await caption(page, "", "", 0);
+    const flagged = page.getByRole("link", { name: "EPR/MH-0412/2026/000777" }).first();
+    await moveTo(page, flagged);
+    await flagged.click();
+    await cutWhile(() => ready(page, /already been claimed elsewhere on EPRFlow/));
+    await moveTo(page, page.getByText(/already been claimed elsewhere on EPRFlow/).first());
+    await caption(page, "Double-sold certificate caught", "This number was already claimed by another company — without revealing who.", 4200);
+    await moveTo(page, page.getByRole("button", { name: "Approve" }));
+    await caption(page, "Approval blocked", "It can't count towards your targets until the flag is resolved — no fake credits, no penalties.", 3800);
+
+    console.log("6. Reports", now().toFixed(1));
+    // ── 6. Reports (≈11s) ─────────────────────────────────────────────────
+    await nav(page, "Reports", "CPCB annual return");
+    await caption(page, "CPCB return in one click", "Annual return, obligation summary and registers — Excel or PDF, straight from your data.", 2000);
+    const annual = page.locator("[data-slot=card]").filter({ hasText: "CPCB annual return" }).first();
+    const xlsx = annual.getByRole("button", { name: /^XLSX/ }).first();
+    await moveTo(page, xlsx);
+    const download = page.waitForEvent("download", { timeout: 60_000 }).catch(() => null);
+    await xlsx.click();
+    await cutWhile(async () => {
+      await download;
+      await page.getByText(/^Downloaded /).first().waitFor({ timeout: 30_000 }).catch(() => {});
+    });
+    await wait(2800);
+
+    console.log("7. Calendar", now().toFixed(1));
+    // ── 7. Calendar (≈8s) ─────────────────────────────────────────────────
+    await nav(page, "Calendar", "Compliance calendar");
+    await caption(page, "Never miss a deadline", "Every filing date in one calendar, with email reminders 30, 7 and 1 day before.", 4300);
+    await smoothScroll(page, 380);
     await wait(1500);
 
-    console.log("4. Alerts", now().toFixed(1));
-    // ── 4. Alerts (≈5s) ───────────────────────────────────────────────────
-    await nav(page, /^Alerts/, "Generated from your targets every day and whenever the dashboard is opened.");
-    await caption(page, "Proactive alerts", "“You are 36% behind on Cat II target with 6 months left” — checked daily, before it becomes a penalty.", 4600);
-
-    console.log("5. Data import with validation", now().toFixed(1));
-    // ── 5. Data import with validation (≈18s) ─────────────────────────────
-    await nav(page, "Materials", "Quantity of packaging and products placed on the market each month.");
-    await caption(page, "Sales data in minutes", "Every tonne placed on market — by month, category, state, brand and plant.", 2600);
-    await caption(page, "", "", 0);
-    await go(page, `${ORG}/materials/import`, "Upload a file");
-    await caption(page, "Bulk import from Excel / CSV", "Upload the sheet you already have — columns are matched automatically.", 1200);
-    await moveTo(page, page.getByText("Drop a file here or click to browse"));
-    await page.locator("#file").setInputFiles(csvPath);
-    await wait(900);
-    const validate = page.getByRole("button", { name: "Validate file" });
-    await moveTo(page, validate);
-    await validate.click();
-    await cutWhile(async () => {
-      await page.waitForURL(/\/materials\/import\/[^/]+$/, { timeout: 60_000 });
-      await ready(page, "Problems found");
-    });
-    await caption(page, "Every problem caught before saving", "Wrong categories, future months, negative quantities and unknown units are flagged row by row.", 3400);
-    await smoothScroll(page, 450);
-    await wait(1800);
-    await smoothScroll(page, -450);
-    const discard = page.getByRole("button", { name: "Discard" });
-    await moveTo(page, discard);
-    await discard.click();
-    await cutWhile(() => page.waitForURL(/\/materials\/import$/, { timeout: 30_000 }));
-
-    console.log("6. Compliance structure", now().toFixed(1));
-    // ── 6. Compliance structure (≈9s) ─────────────────────────────────────
-    await nav(page, "GST registrations", /^Each GSTIN you invoice from/);
-    await caption(page, "Multi-state, multi-brand", "GSTINs verified with the official checksum, plus brands and plants across states.", 3500);
-    await nav(page, "Budgets", "Set a budget");
-    await caption(page, "Budget control", "Plan certificate purchases per financial year and track spend against it.", 3200);
-
-    console.log("7. Trust: roles and audit", now().toFixed(1));
-    // ── 7. Trust: roles and audit (≈6s) ───────────────────────────────────
+    console.log("8. Audit log", now().toFixed(1));
+    // ── 8. Audit log (≈4s) ────────────────────────────────────────────────
     await nav(page, "Audit log", "Every change in this organization, who made it and when.");
-    await caption(page, "Audit-ready", "Every change is logged with who, when and from where. Four roles: Admin, Compliance, Consultant, Viewer.", 4000);
+    await caption(page, "Audit-ready", "Every change logged with who, when and from where — exportable for auditors.", 3800);
 
-    console.log("8. Consultants", now().toFixed(1));
-    // ── 8. Consultants (≈9s) ──────────────────────────────────────────────
+    console.log("9. Consultants", now().toFixed(1));
+    // ── 9. Consultants (≈9s) ──────────────────────────────────────────────
     await caption(page, "", "", 0);
     await switchSession(context, consultant);
-    await go(page, `${ORG}/dashboard`, "Compliance score");
-    await caption(page, "Built for consultants too", "EPR consultants manage many client companies from one login.", 1500);
-    await click(page, page.locator("[data-sidebar=header] button").first(), 1600);
-    const client = page.getByRole("menuitem", { name: "GreenPack Industries" });
-    await moveTo(page, client);
-    await wait(300);
-    await page.keyboard.press("Escape");
-    await go(page, `${BASE}/o/greenpack-industries/dashboard`, "Compliance score");
-    await caption(page, "Isolated client workspaces", "Each client's data is strictly separated at the database layer.", 3000);
-
-    console.log("9. Regulation rules", now().toFixed(1));
-    // ── 9. Regulation rules (≈8s) ─────────────────────────────────────────
-    await caption(page, "", "", 0);
-    await switchSession(context, ops);
-    await go(page, `${BASE}/admin/rules`, "Regulation rules");
-    await caption(page, "Rules change? Update once.", "CPCB targets and EC rates are versioned data, not code — every customer recalculates instantly.", 3500);
-    await click(page, page.getByRole("button", { name: "Edit" }).first(), 1800);
-    await page.keyboard.press("Escape");
-    await wait(500);
-
-    console.log("10. Dark mode", now().toFixed(1));
-    // ── 10. Dark mode (≈5s) ───────────────────────────────────────────────
-    await caption(page, "", "", 0);
-    await switchSession(context, admin);
-    await go(page, `${ORG}/dashboard`, "Compliance score");
-    await setTheme(page, "Dark");
-    await caption(page, "Polished & secure", "Light and dark mode, rate-limited logins, CSP headers and encrypted sessions — on Vercel + Neon Postgres.", 4200);
+    await go(page, `${BASE}/consultant`, "All clients");
+    await caption(page, "Built for consultants too", "Every client company's score, risk and next deadline on one screen — riskiest first.", 4500);
+    await moveTo(page, page.getByRole("link", { name: /GreenPack/ }).first()).catch(() => {});
+    await wait(2500);
     await caption(page, "", "", 0);
 
-    console.log("11. Roadmap & close", now().toFixed(1));
-    // ── 11. Roadmap & close (≈15s) ────────────────────────────────────────
+    console.log("10. Close", now().toFixed(1));
+    // ── 10. Close (≈11s) ──────────────────────────────────────────────────
     await card(
       page,
-      `<small>Coming next</small><h1>From tracking to automation</h1>
-       <ul><li>Certificate marketplace checks &amp; fraud detection</li>
-       <li>AI extraction of invoices and certificates (Claude)</li>
-       <li>CPCB-ready annual returns &amp; deadline reminders</li></ul>`,
-      6000,
+      `<small>How EPRFlow solves it</small><h1>From spreadsheets to certainty</h1>
+       <ul><li>Targets calculated automatically from CPCB rules</li>
+       <li>AI reads invoices and certificates — people approve</li>
+       <li>Fraud checks on every certificate</li>
+       <li>CPCB-ready reports and deadline reminders</li></ul>`,
+      6500,
     );
-    await showCard(page, `<small>EPRFlow</small><h1>Compliance that pays for itself</h1><p>One avoided EC penalty covers years of subscription.<br/>Let's make EPR compliance effortless for every Indian brand.</p>`);
+    await showCard(page, `<small>EPRFlow</small><h1>Compliance that pays for itself</h1><p>One avoided Environmental Compensation penalty covers years of subscription.<br/>Let's make EPR compliance effortless for every Indian brand.</p>`);
     await wait(5000);
     cuts.push([now(), 9999]); // nothing after the closing card
   } finally {
@@ -384,7 +416,7 @@ async function main() {
     // ffmpeg filter that drops the loading gaps, e.g. -vf "$(cat demo/cuts.txt)"
     const drop = cuts.map(([a, b]) => `between(t,${a.toFixed(2)},${b.toFixed(2)})`).join("+");
     await writeFile(path.join(OUT, "cuts.txt"), `select='not(${drop})',setpts=N/25/TB`);
-    await cleanup();
+    await cleanup(since);
   }
   const kept = cuts.slice(0, -1).reduce((t, [a, b]) => t - (b - a), cuts.at(-1)[0]);
   console.log(`Saved ${path.join(OUT, "eprflow-demo.webm")} — about ${kept.toFixed(0)}s after cutting ${cuts.length} loading gaps`);
