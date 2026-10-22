@@ -44,6 +44,13 @@ export const signupSchema = z
   });
 
 /** Only allow same-site relative redirects (blocks open-redirects like //evil.com or /\evil.com). */
+export const forgotPasswordSchema = z.object({ email: emailSchema });
+
+export const resetPasswordSchema = z.object({
+  token: z.string().regex(/^[A-Za-z0-9_-]{32,128}$/, "This reset link is invalid. Request a new one."),
+  password: passwordSchema,
+});
+
 export function safeCallbackUrl(value: unknown, fallback = "/o"): string {
   return typeof value === "string" && /^\/(?![/\\])/.test(value) ? value : fallback;
 }

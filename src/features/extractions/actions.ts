@@ -19,7 +19,7 @@ import { runExtraction } from "./service";
 
 const ID = /^[a-z0-9]{10,40}$/i;
 
-/** Upload a certificate or invoice; Claude reads it in the background after the response. */
+/** Upload a certificate or invoice; the AI reads it in the background after the response. */
 export async function uploadExtractionAction(orgSlug: string, _prev: ActionState, formData: FormData): Promise<ActionState> {
   let id: string;
   try {

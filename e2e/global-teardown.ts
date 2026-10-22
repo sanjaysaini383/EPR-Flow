@@ -12,6 +12,7 @@ export default async function globalTeardown() {
         WHERE u.email LIKE 'e2e-%@example.com'
       )`);
     await client.query(`DELETE FROM "User" WHERE email LIKE 'e2e-%@example.com'`);
+    await client.query(`DELETE FROM "VerificationToken" WHERE identifier LIKE 'password-reset:%' AND substring(identifier from 16) NOT IN (SELECT id FROM "User")`);
     await client.query(`DELETE FROM "Invitation" WHERE email LIKE 'invitee-%@example.com'`);
     await client.query(`DELETE FROM "MaterialEntry" WHERE notes = 'e2e-test'`);
     await client.query(`DELETE FROM "ImportBatch" WHERE "fileName" LIKE 'e2e-%' OR "fileName" = 'evil.xlsx'`);
@@ -28,7 +29,7 @@ export default async function globalTeardown() {
     await client.query(`DELETE FROM "StoredFile" WHERE kind = 'CERTIFICATE_PDF' AND "fileName" = 'certificate.pdf' AND NOT EXISTS (SELECT 1 FROM "Certificate" c WHERE c."fileId" = "StoredFile".id)`);
     await client.query(`DELETE FROM "Recycler" WHERE name LIKE 'E2E Recycler %'`);
     await client.query(`DELETE FROM "AuditLog" WHERE "organizationId" IS NULL AND action = 'rule.new_version' AND "actorId" = (SELECT id FROM "User" WHERE email = 'ops@eprflow.in')`);
-    await client.query(`DELETE FROM "RateLimit" WHERE key LIKE 'login:%' OR key LIKE 'signup:%' OR key LIKE 'invite%' OR key LIKE 'import%' OR key LIKE 'report:%' OR key LIKE 'extract:%'`);
+    await client.query(`DELETE FROM "RateLimit" WHERE key LIKE 'login:%' OR key LIKE 'signup:%' OR key LIKE 'invite%' OR key LIKE 'import%' OR key LIKE 'report:%' OR key LIKE 'extract:%' OR key LIKE 'reset:%'`);
   } finally {
     await client.end();
   }

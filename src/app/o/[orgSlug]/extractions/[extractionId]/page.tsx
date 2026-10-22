@@ -105,7 +105,7 @@ export default async function ExtractionPage({ params }: PageProps<"/o/[orgSlug]
               <CardContent className="flex items-center gap-3 py-6">
                 <LoaderCircleIcon className="size-5 animate-spin text-primary motion-reduce:animate-none" aria-hidden />
                 <div>
-                  <p className="font-medium">Claude is reading the document…</p>
+                  <p className="font-medium">AI is reading the document…</p>
                   <p className="text-sm text-muted-foreground">This usually takes 10–40 seconds. The page updates by itself.</p>
                 </div>
               </CardContent>

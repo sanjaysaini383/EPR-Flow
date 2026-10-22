@@ -7,7 +7,7 @@ import { storageFor } from "@/lib/storage";
 /** A run still "processing" after this long has died with its function (timeout) and can be retried. */
 export const STALE_AFTER_MS = 5 * 60 * 1000;
 
-export const NOT_CONFIGURED = "AI extraction is not set up on this server (ANTHROPIC_API_KEY is missing). You can still enter the details by hand below.";
+export const NOT_CONFIGURED = "AI extraction is not set up on this server (set GEMINI_API_KEY — free — or ANTHROPIC_API_KEY). You can still enter the details by hand below.";
 
 export function isStale(e: { status: string; updatedAt: Date }, now = new Date()) {
   return (e.status === "PROCESSING" || e.status === "QUEUED") && now.getTime() - e.updatedAt.getTime() > STALE_AFTER_MS;
@@ -15,7 +15,7 @@ export function isStale(e: { status: string; updatedAt: Date }, now = new Date()
 
 /**
  * Runs one extraction: claims it (QUEUED → PROCESSING, so two runs never overlap),
- * sends the document to Claude and stores the validated result for human review.
+ * sends the document to the configured AI provider and stores the validated result for human review.
  * Never throws — failures are recorded on the extraction with a readable message.
  */
 export async function runExtraction(db: TenantDb, extractionId: string) {

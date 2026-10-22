@@ -177,6 +177,7 @@ model User {
   emailVerified    DateTime?
   image            String?
   passwordHash     String? // null for Google-only users
+  passwordChangedAt DateTime? // sessions signed in before this are rejected (password reset signs out everywhere)
   isPlatformAdmin  Boolean   @default(false) // edits regulation rules, verifies recyclers
   lastActiveOrgId  String?
   createdAt        DateTime  @default(now())

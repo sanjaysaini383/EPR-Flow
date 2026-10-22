@@ -9,11 +9,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { AutoRefresh, UploadExtractionForm } from "@/features/extractions/components";
 import { isStale } from "@/features/extractions/service";
 import { ExtractionStatusBadge } from "@/features/extractions/status-badge";
-import { getExtractionProvider } from "@/lib/ai/extract";
+import { getExtractionProvider, providerLabel } from "@/lib/ai/extract";
 import { getOrgContext } from "@/lib/auth/session";
 
 export const metadata: Metadata = { title: "AI extraction" };
-// Uploads run Claude in the background after responding; give the function time to finish.
+// Uploads run the AI in the background after responding; give the function time to finish.
 export const maxDuration = 120;
 
 const timeFormat = new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" });
@@ -30,7 +30,8 @@ export default async function ExtractionsPage({ params }: PageProps<"/o/[orgSlug
     where: { userId: { in: [...new Set(extractions.map((e) => e.createdById))] } },
     select: { userId: true, user: { select: { name: true, email: true } } },
   });
-  const configured = getExtractionProvider() !== null;
+  const provider = getExtractionProvider();
+  const configured = provider !== null;
   const now = new Date();
   const running = extractions.some((e) => (e.status === "QUEUED" || e.status === "PROCESSING") && !isStale(e, now));
 
@@ -39,14 +40,14 @@ export default async function ExtractionsPage({ params }: PageProps<"/o/[orgSlug
       <AutoRefresh active={running} />
       <PageHeader
         title="AI extraction"
-        description="Upload an EPR certificate or an invoice. Claude reads it, you check every value side by side with the document, and nothing is saved until you approve it."
+        description={`Upload an EPR certificate or an invoice. ${provider ? `${providerLabel(provider.name)} reads it` : "AI reads it"}, you check every value side by side with the document, and nothing is saved until you approve it.`}
       />
 
       {!configured && (
         <Alert className="border-status-warning/50">
           <CircleAlertIcon className="text-status-warning" />
           <AlertTitle>AI is not set up on this server</AlertTitle>
-          <AlertDescription>Set ANTHROPIC_API_KEY (and optionally ANTHROPIC_MODEL) to read documents automatically. Uploads still work — you enter the values by hand next to the document.</AlertDescription>
+          <AlertDescription>Add a free GEMINI_API_KEY from Google AI Studio (or an ANTHROPIC_API_KEY for Claude) to read documents automatically. Uploads still work — you enter the values by hand next to the document.</AlertDescription>
         </Alert>
       )}
 

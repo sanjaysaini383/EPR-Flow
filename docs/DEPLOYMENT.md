@@ -42,11 +42,16 @@ Nothing here uses Docker: the app runs as Vercel functions, data lives in Neon P
 | `EMAIL_FROM` | yes | e.g. `EPRFlow <no-reply@your-domain.in>` — a sender your provider has verified (SPF/DKIM) |
 | `BLOB_READ_WRITE_TOKEN` | yes | Added by the Blob integration |
 | `STORAGE_DRIVER` | – | `blob` (default) |
-| `ANTHROPIC_API_KEY` | for AI | From console.anthropic.com. Without it, uploads still work with manual entry. |
+| `GEMINI_API_KEY` | for AI (free) | From aistudio.google.com/apikey. Free tier has daily limits, and Google may use free-tier content to improve its products — enable billing on the key for confidential customer documents. |
+| `GEMINI_MODEL` | – | Defaults to `gemini-2.5-flash` |
+| `ANTHROPIC_API_KEY` | for AI (paid) | From console.anthropic.com. Takes precedence over Gemini when both are set. |
 | `ANTHROPIC_MODEL` | – | Defaults to `claude-opus-5-5` |
+| `AI_PROVIDER` | – | `gemini` or `claude` to force one provider |
+
+Without any AI key, uploads still work and values are entered by hand next to the document.
 | `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET` | – | Only for "Continue with Google" (step 6) |
 
-Never set `AI_PROVIDER` or `E2E_RATE_LIMIT_MULTIPLIER` in production — both are ignored there anyway, but they have no purpose outside tests.
+Never set `AI_PROVIDER=fake` or `E2E_RATE_LIMIT_MULTIPLIER` in production — both are ignored there anyway; they exist for tests.
 
 4. Deploy. The first deploy creates all tables.
 
@@ -113,7 +118,7 @@ With a fresh account on production:
 2. Import the materials template from **Materials → Import**.
 3. Open **Targets**. The placeholder warning disappears once all rules in force are verified.
 4. Add a certificate with a PDF. Approve it as Admin and check that it counts on the dashboard.
-5. Upload a certificate on **AI extraction**. It should be read within a minute (needs `ANTHROPIC_API_KEY`).
+5. Upload a certificate on **AI extraction**. It should be read within a minute (needs `GEMINI_API_KEY` or `ANTHROPIC_API_KEY`).
 6. Download the annual return as Excel and PDF from **Reports**.
 
 ## 9. Operating it
@@ -123,7 +128,7 @@ With a fresh account on production:
 - **Backups:** Neon's point-in-time restore. For a long-term copy, run `pg_dump "$DIRECT_URL"` on a schedule outside Vercel.
 - **Secrets:** rotating `AUTH_SECRET` signs everyone out. Rotating `CRON_SECRET` needs a redeploy.
 - **Limits:** documents are capped at 4 MB, because a Vercel function accepts at most 4.5 MB. Spreadsheets are capped at 5 MB and 5,000 rows. AI uploads are limited to 100 per organisation per hour.
-- **Costs:** each AI extraction is one Claude API call; the token count is stored on the extraction for monitoring. Report downloads are rate-limited per user.
+- **Costs:** each AI extraction is one API call (free within Gemini's daily limits, paid on Claude); the token count is stored on the extraction for monitoring. Report downloads are rate-limited per user.
 
 ## 10. Security checklist
 

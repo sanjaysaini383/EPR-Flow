@@ -116,10 +116,11 @@ The **recycler directory** shows verification, capacity use across EPRFlow, rati
 
 ### AI extraction
 
-`/o/[org]/extractions`: upload an EPR certificate or an invoice; Claude reads it after the upload responds (`after()`), and the reviewer checks every value next to the document. Low-confidence fields and the model's warnings are listed; nothing is saved until the reviewer approves — certificates become drafts (then the normal approval and fraud checks), invoice lines become material entries (source "AI").
+`/o/[org]/extractions`: upload an EPR certificate or an invoice; the AI reads it after the upload responds (`after()`), and the reviewer checks every value next to the document. Low-confidence fields and the model's warnings are listed; nothing is saved until the reviewer approves — certificates become drafts (then the normal approval and fraud checks), invoice lines become material entries (source "AI").
 
-- Model: `ANTHROPIC_MODEL` (default `claude-opus-5-5`), structured outputs validated with Zod, server-side refusal fallback enabled; token usage is stored per document.
-- Without `ANTHROPIC_API_KEY` the upload still works and the values are entered by hand.
+- Providers: **Google Gemini** (`GEMINI_API_KEY`, free tier, model `GEMINI_MODEL`, default `gemini-2.5-flash`) or **Anthropic Claude** (`ANTHROPIC_API_KEY`, model `ANTHROPIC_MODEL`, default `claude-opus-5-5`, with server-side refusal fallback). Claude is used when both keys are set; `AI_PROVIDER=gemini|claude` forces one. Both get the same prompt and JSON schema, and every reply is validated with Zod; token usage is stored per document.
+- Gemini's free tier has daily request limits, and Google may use free-tier content to improve its products — use a paid key for confidential customer documents in production.
+- Without any key the upload still works and the values are entered by hand.
 - `AI_PROVIDER=fake` (development only) returns fixed sample data; the e2e tests use it.
 - Uploads are rate-limited (100 per organisation per hour) because each one is a paid API call.
 
@@ -159,6 +160,7 @@ Builders are pure functions ([src/lib/domain/reports/build.ts](src/lib/domain/re
 | Errors | Users see clear messages; unexpected errors show only a reference id — stack traces and SQL never reach the browser |
 | Audit trail | Every change logged with actor, IP and user agent; secrets are stripped from logged values |
 | Secrets | Invite tokens stored as SHA-256 hashes; env vars validated at startup ([env.ts](src/lib/env.ts)) |
+| Password reset | One-time link valid 1 hour, token stored hashed, same response for unknown emails, rate-limited; a reset signs the account out of every other session |
 
 ## Deploying (Vercel + Neon)
 

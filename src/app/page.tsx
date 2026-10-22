@@ -36,7 +36,7 @@ const FEATURES = [
   {
     icon: ScanTextIcon,
     title: "AI document reading",
-    body: "Upload a certificate or an invoice. Claude reads it; you check each value next to the document and approve — nothing is saved blindly.",
+    body: "Upload a certificate or an invoice. AI reads it; you check each value next to the document and approve — nothing is saved blindly.",
   },
   {
     icon: BellRingIcon,

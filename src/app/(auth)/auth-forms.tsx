@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useFormAction } from "@/hooks/use-form-action";
 import type { ActionState } from "@/lib/actions";
-import { googleSignInAction, loginAction, signupAction } from "./actions";
+import { googleSignInAction, loginAction, requestPasswordResetAction, resetPasswordAction, signupAction } from "./actions";
 
 export function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
   const [state, onSubmit, pending] = useFormAction(loginAction, {} as ActionState);
@@ -23,6 +23,9 @@ export function LoginForm({ callbackUrl }: { callbackUrl?: string }) {
       <FormField label="Password" htmlFor="password" error={state.fieldErrors?.password}>
         <PasswordInput id="password" name="password" autoComplete="current-password" required />
       </FormField>
+      <Link href="/forgot-password" className="-mt-2 justify-self-end text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+        Forgot password?
+      </Link>
       <SubmitButton size="lg" className="w-full" pending={pending}>
         Log in
       </SubmitButton>
@@ -51,6 +54,48 @@ export function SignupForm({ callbackUrl, defaultEmail }: { callbackUrl?: string
       </div>
       <SubmitButton size="lg" className="w-full" pending={pending}>
         Create account
+      </SubmitButton>
+    </form>
+  );
+}
+
+export function ForgotPasswordForm() {
+  const [state, onSubmit, pending] = useFormAction(requestPasswordResetAction, {} as ActionState);
+  if (state.ok) {
+    return (
+      <p role="status" className="rounded-lg border border-primary/30 bg-brand-soft/40 p-4 text-sm">
+        {state.message}
+      </p>
+    );
+  }
+  return (
+    <form onSubmit={onSubmit} noValidate className="grid gap-4">
+      <FormError message={state.fieldErrors ? undefined : state.error} />
+      <FormField label="Work email" htmlFor="email" error={state.fieldErrors?.email}>
+        <Input id="email" name="email" type="email" autoComplete="email" required autoFocus />
+      </FormField>
+      <SubmitButton size="lg" className="w-full" pending={pending}>
+        Send reset link
+      </SubmitButton>
+    </form>
+  );
+}
+
+export function ResetPasswordForm({ token }: { token: string }) {
+  const [state, onSubmit, pending] = useFormAction(resetPasswordAction, {} as ActionState);
+  const [password, setPassword] = useState("");
+  return (
+    <form onSubmit={onSubmit} noValidate className="grid gap-4">
+      <input type="hidden" name="token" value={token} />
+      <FormError message={state.fieldErrors?.token?.[0] ?? (state.fieldErrors ? undefined : state.error)} />
+      <div className="grid gap-2">
+        <FormField label="New password" htmlFor="password" error={state.fieldErrors?.password}>
+          <PasswordInput id="password" name="password" autoComplete="new-password" required autoFocus onValueChange={setPassword} />
+        </FormField>
+        <PasswordRules value={password} />
+      </div>
+      <SubmitButton size="lg" className="w-full" pending={pending}>
+        Set new password
       </SubmitButton>
     </form>
   );

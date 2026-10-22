@@ -19,9 +19,11 @@ export const LIMITS = {
   signupPerIp: { limit: 5, windowSeconds: 60 * 60 },
   invitePerOrg: { limit: 30, windowSeconds: 60 * 60 },
   acceptInvitePerIp: { limit: 20, windowSeconds: 15 * 60 },
+  passwordResetPerIp: { limit: 10, windowSeconds: 60 * 60 },
+  passwordResetPerEmail: { limit: 3, windowSeconds: 60 * 60 },
   importPerOrg: { limit: 60, windowSeconds: 60 * 60 },
   reportPerUser: { limit: 60, windowSeconds: 60 * 60 },
-  // Each extraction is a paid Claude API call.
+  // Each extraction is an AI API call (paid, or limited on free tiers).
   extractionPerOrg: { limit: 100, windowSeconds: 60 * 60 },
 } as const;
 

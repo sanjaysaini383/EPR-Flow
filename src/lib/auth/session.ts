@@ -16,10 +16,15 @@ export class ForbiddenError extends Error {
 export const getCurrentUser = cache(async () => {
   const session = await auth();
   if (!session?.user?.id) return null;
-  return prisma.user.findUnique({
+  const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { id: true, name: true, email: true, image: true, isPlatformAdmin: true, lastActiveOrgId: true },
+    select: { id: true, name: true, email: true, image: true, isPlatformAdmin: true, lastActiveOrgId: true, passwordChangedAt: true },
   });
+  if (!user) return null;
+  // A password reset signs the user out everywhere: older sessions no longer count.
+  if (user.passwordChangedAt && (session.authAt ?? 0) < user.passwordChangedAt.getTime()) return null;
+  const { passwordChangedAt: _changed, ...rest } = user;
+  return rest;
 });
 
 export type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>;

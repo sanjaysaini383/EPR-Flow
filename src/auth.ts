@@ -10,6 +10,8 @@ import { loginSchema } from "@/lib/validation/auth";
 declare module "next-auth" {
   interface Session {
     user: { id: string } & DefaultSession["user"];
+    /** When this session was signed in (ms). Sessions older than a password change are rejected. */
+    authAt?: number;
   }
 }
 
@@ -57,11 +59,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   ],
   callbacks: {
     jwt({ token, user }) {
-      if (user?.id) token.sub = user.id;
+      if (user?.id) {
+        token.sub = user.id;
+        token.authAt = Date.now(); // set once at sign-in; refreshes keep it
+      }
       return token;
     },
     session({ session, token }) {
       if (token.sub) session.user.id = token.sub;
+      if (typeof token.authAt === "number") session.authAt = token.authAt;
       return session;
     },
   },

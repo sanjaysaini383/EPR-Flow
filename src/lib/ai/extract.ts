@@ -1,32 +1,16 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
-import { certificateExtractionSchema, invoiceExtractionSchema, type CertificateExtraction, type InvoiceExtraction } from "./schemas";
+import { geminiProvider } from "./gemini";
+import { SYSTEM_PROMPT as SYSTEM, TASK_PROMPT as PROMPT } from "./prompts";
+import { certificateExtractionSchema, invoiceExtractionSchema } from "./schemas";
+import { ExtractionError, type ExtractionProvider } from "./types";
 
-export type ExtractionTarget = "CERTIFICATE" | "MATERIAL_ENTRY";
-export type ExtractionOutput =
-  | { target: "CERTIFICATE"; data: CertificateExtraction }
-  | { target: "MATERIAL_ENTRY"; data: InvoiceExtraction };
-export type ExtractionResult = ExtractionOutput & { model: string; inputTokens: number | null; outputTokens: number | null };
+export { ExtractionError };
+export type { ExtractionOutput, ExtractionProvider, ExtractionResult, ExtractionTarget } from "./types";
 
-export class ExtractionError extends Error {}
-
-/** Default model for extraction; override with ANTHROPIC_MODEL. */
+/** Default Claude model for extraction; override with ANTHROPIC_MODEL. */
 export const DEFAULT_MODEL = "claude-opus-5-5";
-
-export interface ExtractionProvider {
-  readonly name: string;
-  extract(input: { bytes: Uint8Array; mimeType: string; target: ExtractionTarget }): Promise<ExtractionResult>;
-}
-
-const SYSTEM = `You read documents for an Indian EPR (Extended Producer Responsibility) compliance team: EPR certificates issued by registered plastic waste processors under the Plastic Waste Management Rules 2022, and invoices for plastic packaging or packaged goods.
-
-Extract only what is printed on the document. When a value is missing, illegible or ambiguous, return null and lower its confidence — never infer or invent numbers, dates or registration numbers. Convert tonnes/MT to kilograms. Dates as YYYY-MM-DD (Indian documents usually print day first). Mention anything suspicious (overwritten figures, missing signature or stamp, totals that do not match) in warnings.`;
-
-const PROMPT: Record<ExtractionTarget, string> = {
-  CERTIFICATE: "Extract the EPR certificate details from this document.",
-  MATERIAL_ENTRY: "Extract the invoice header and every line item that is plastic packaging or packaged goods from this document.",
-};
 
 function claudeProvider(): ExtractionProvider {
   const client = new Anthropic();
@@ -127,9 +111,23 @@ function fakeProvider(): ExtractionProvider {
   };
 }
 
-/** The configured provider, or null when AI extraction is not set up. */
+/**
+ * The configured provider, or null when AI extraction is not set up.
+ * AI_PROVIDER ("claude" | "gemini" | "fake") picks one explicitly; otherwise Claude is used
+ * when ANTHROPIC_API_KEY is set, then Gemini when GEMINI_API_KEY is set (free tier available).
+ */
 export function getExtractionProvider(): ExtractionProvider | null {
-  if (process.env.NODE_ENV !== "production" && process.env.AI_PROVIDER === "fake") return fakeProvider();
-  if (process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN) return claudeProvider();
+  const choice = process.env.AI_PROVIDER?.trim().toLowerCase();
+  const claudeKey = process.env.ANTHROPIC_API_KEY || process.env.ANTHROPIC_AUTH_TOKEN;
+  const geminiKey = process.env.GEMINI_API_KEY?.trim();
+  if (choice === "fake" && process.env.NODE_ENV !== "production") return fakeProvider();
+  if (choice === "gemini") return geminiKey ? geminiProvider(geminiKey) : null;
+  if (choice === "claude") return claudeKey ? claudeProvider() : null;
+  if (claudeKey) return claudeProvider();
+  if (geminiKey) return geminiProvider(geminiKey);
   return null;
+}
+
+export function providerLabel(name: ExtractionProvider["name"]): string {
+  return name === "claude" ? "Claude" : name === "gemini" ? "Gemini" : "Demo AI";
 }

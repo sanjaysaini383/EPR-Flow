@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 /**
- * Shapes Claude must return (structured outputs). Every field is nullable: the model
+ * Shapes the AI must return (structured outputs, for Claude and Gemini alike). Every field is nullable: the model
  * reports null rather than guessing when a value is not on the document. Confidence is
  * 0–1 per field and drives which fields the reviewer is asked to check.
  */

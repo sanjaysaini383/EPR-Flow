@@ -19,7 +19,7 @@ const AUTH_ERRORS: Record<string, string> = {
 };
 
 export default async function LoginPage({ searchParams }: PageProps<"/login">) {
-  const { callbackUrl: raw, error } = await searchParams;
+  const { callbackUrl: raw, error, reset } = await searchParams;
   const callbackUrl = safeCallbackUrl(raw, "");
   if (await getCurrentUser()) redirect(callbackUrl || "/o");
 
@@ -31,6 +31,11 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
           <CardDescription>Log in to manage your EPR compliance.</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4">
+          {reset === "1" && (
+            <p role="status" className="rounded-lg border border-primary/30 bg-brand-soft/40 p-3 text-sm">
+              Your password was changed. Log in with the new one.
+            </p>
+          )}
           <FormError message={typeof error === "string" ? (AUTH_ERRORS[error] ?? AUTH_ERRORS.Default) : undefined} title="Sign-in failed" />
           {googleEnabled && (
             <>
